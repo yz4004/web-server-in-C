@@ -1,0 +1,720 @@
+From 64e44df168e101c502800e7d1b67fc2fffb5ecf5 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 06:05:41 -0400
+Subject: [PATCH 1/6] part1
+
+---
+ part1/mdb-lookup-server.c | 229 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 229 insertions(+)
+ create mode 100644 part1/mdb-lookup-server.c
+
+diff --git a/part1/mdb-lookup-server.c b/part1/mdb-lookup-server.c
+new file mode 100644
+index 0000000..0df6051
+--- /dev/null
++++ b/part1/mdb-lookup-server.c
+@@ -0,0 +1,229 @@
++/*
++ * 
++ */
++
++#include <ctype.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <assert.h>
++#include <unistd.h>
++#include <sys/wait.h>
++#include <sys/stat.h>
++#include <arpa/inet.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "mylist.h"
++#include "mdb.h"
++
++#define KeyMax 5
++
++
++
++
++
++int loadmdb(FILE *fp, struct List *dest) 
++{
++    /*
++     * read all records into memory
++     */
++
++    struct MdbRec r;
++    struct Node *node = NULL;
++    int count = 0;
++
++    while (fread(&r, sizeof(r), 1, fp) == 1) {
++
++        // allocate memory for a new record and copy into it the one
++        // that was just read from the database.
++        struct MdbRec *rec = (struct MdbRec *)malloc(sizeof(r));
++        if (!rec)
++            return -1;
++        memcpy(rec, &r, sizeof(r));
++
++        // add the record to the linked list.
++        node = addAfter(dest, node, rec);
++        if (node == NULL) 
++            return -1;
++
++        count++;
++    }
++
++    // see if fread() produced error
++    if (ferror(fp)) 
++        return -1;
++
++    return count;
++}
++
++void freemdb(struct List *list) 
++{
++    // free all the records
++    traverseList(list, &free);
++    removeAllNodes(list);
++}
++
++
++
++static void die(const char *s) { perror(s); exit(1); }
++
++int main(int argc, char **argv)
++{
++    // ignore SIGPIPE so that we don’t terminate when we call
++    // send() on a disconnected socket.
++    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) 
++    die("signal() failed");
++
++
++    if (argc != 3) {
++        fprintf(stderr, "usage: %s <server-port>\n", argv[0]);
++        exit(1);
++    }
++
++
++
++    // db part
++    // ---------------------------------------------------------------------------------
++
++    char *filename = argv[1];
++    FILE *fp = fopen(filename,"rb");
++    if (fp == NULL) 
++        die(filename);
++
++    struct List list;
++    initList(&list);
++
++    int loaded = loadmdb(fp, &list);
++    if (loaded < 0)
++        die("loadmdb");
++    
++    fclose(fp);
++    // ---------------------------------------------------------------------------------
++
++
++
++
++    // socket part
++    // ---------------------------------------------------------------------------------
++    unsigned short port = atoi(argv[2]);
++
++    int servsock;
++    if ((servsock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
++        die("socket failed");
++
++    struct sockaddr_in servaddr;
++    memset(&servaddr, 0, sizeof(servaddr));
++    servaddr.sin_family = AF_INET;
++    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); // any network interface
++    servaddr.sin_port = htons(port);
++
++
++    if (bind(servsock, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
++        die("bind failed");
++
++    if (listen(servsock, 5 /* queue size for connection requests */ ) < 0)
++        die("listen failed");
++
++    // int r;
++    // char buf[10];
++
++    int clntsock;
++    socklen_t clntlen;
++    struct sockaddr_in clntaddr;
++    // ---------------------------------------------------------------------------------
++
++    while (1) {
++
++        // Accept an incoming connection
++
++        fprintf(stderr, "waiting for client ... ");
++
++        clntlen = sizeof(clntaddr); // initialize the in-out parameter
++
++        if ((clntsock = accept(servsock,
++                        (struct sockaddr *) &clntaddr, &clntlen)) < 0)
++            die("accept failed");
++
++        // accept() returned a connected socket (also called client socket)
++        // and filled in the client's address into clntaddr
++
++        fprintf(stderr, "client ip: %s\n", inet_ntoa(clntaddr.sin_addr));
++
++
++
++        // ##############
++        FILE *input = fdopen(clntsock, "r" );
++        
++        char line[1000];
++        char key[KeyMax + 1];
++
++        int r;
++
++        // recv()
++        while ( fgets(line, sizeof(line), input) != NULL) {
++            
++
++            // must null-terminate the string manually after strncpy().
++            strncpy(key, line, sizeof(key) - 1);
++            key[sizeof(key) - 1] = '\0';
++
++            // if newline is there, remove it.
++            size_t last = strlen(key) - 1;
++            if (key[last] == '\n')
++                key[last] = '\0';
++
++            // traverse the list, printing out the matching records
++            struct Node* node = list.head;
++            int recNo = 1;
++            while (node) {
++                struct MdbRec* rec = (struct MdbRec*)node->data;
++                if (strstr(rec->name, key) || strstr(rec->msg, key)) {
++                    //printf("%4d: {%s} said {%s}\n", recNo, rec->name, rec->msg);
++
++                    
++                    char output_record[50];
++                    if((r = snprintf(output_record, 50, "%4d: {%s} said {%s}\n", recNo, rec->name, rec->msg)) == 0){
++                        die("snprintf");
++                    }
++                    if(send(clntsock, output_record, r, 0) != r){     
++                       fprintf(stderr, "ERR: send failed\n");
++                       break;
++                    }
++                   
++
++                }
++                node = node->next;
++                recNo++;
++            }
++
++            // printf("\nlookup: ");
++            // fflush(stdout);
++            char blankline[1];
++            *blankline = '\n';
++            if (send(clntsock, blankline, 1, 0) != 1){
++                fprintf(stderr, "ERR: send blank line failed\n");
++                }
++
++        // see if fgets() produced error
++        if (ferror(input))
++            die("input");
++
++        }
++
++    
++        // #################################
++        freemdb(&list);
++    
++        fclose(input);
++
++        close(clntsock);
++     }    
++
++
++     return 0;
++}
+-- 
+2.17.1
+
+
+From 0934e14eec93e58770a6b6a17c066829ad69b202 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 06:21:24 -0400
+Subject: [PATCH 2/6] modify part1
+
+---
+ part1/mdb-lookup-server.c | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/part1/mdb-lookup-server.c b/part1/mdb-lookup-server.c
+index 0df6051..25acf39 100644
+--- a/part1/mdb-lookup-server.c
++++ b/part1/mdb-lookup-server.c
+@@ -209,21 +209,19 @@ int main(int argc, char **argv)
+                 fprintf(stderr, "ERR: send blank line failed\n");
+                 }
+ 
+-        // see if fgets() produced error
+-        if (ferror(input))
+-            die("input");
++            // see if fgets() produced error
++            if (ferror(input))
++                die("input");
+ 
+         }
+ 
+-    
+-        // #################################
+-        freemdb(&list);
+-    
+         fclose(input);
+-
++    
+         close(clntsock);
++        // #################################
+      }    
+ 
+ 
++     freemdb(&list);
+      return 0;
+ }
+-- 
+2.17.1
+
+
+From 3ca0284987ab9efb691f0fd92a379a28b7ccbe3c Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 06:38:31 -0400
+Subject: [PATCH 3/6] modify part1 again
+
+---
+ part1/mdb-lookup-server.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/part1/mdb-lookup-server.c b/part1/mdb-lookup-server.c
+index 25acf39..6eacf73 100644
+--- a/part1/mdb-lookup-server.c
++++ b/part1/mdb-lookup-server.c
+@@ -1,5 +1,5 @@
+ /*
+- * 
++ *  mdb-lookup-server.c 
+  */
+ 
+ #include <ctype.h>
+@@ -106,6 +106,7 @@ int main(int argc, char **argv)
+     // ---------------------------------------------------------------------------------
+ 
+ 
++    fprintf(stderr, "\n");
+ 
+ 
+     // socket part
+@@ -141,7 +142,7 @@ int main(int argc, char **argv)
+ 
+         // Accept an incoming connection
+ 
+-        fprintf(stderr, "waiting for client ... ");
++        // fprintf(stderr, "waiting for client ... ");
+ 
+         clntlen = sizeof(clntaddr); // initialize the in-out parameter
+ 
+@@ -152,8 +153,9 @@ int main(int argc, char **argv)
+         // accept() returned a connected socket (also called client socket)
+         // and filled in the client's address into clntaddr
+ 
+-        fprintf(stderr, "client ip: %s\n", inet_ntoa(clntaddr.sin_addr));
++        //fprintf(stderr, "client ip: %s\n", inet_ntoa(clntaddr.sin_addr));
+ 
++        fprintf(stderr, "connection started from: %s\n", inet_ntoa(clntaddr.sin_addr));
+ 
+ 
+         // ##############
+-- 
+2.17.1
+
+
+From ecc457685b0d77f41ecf1f1e7ee8225574124bed Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 17:41:01 -0400
+Subject: [PATCH 4/6] part2
+
+---
+ part2/Makefile      |  28 +++++++
+ part2/http-client.c | 198 ++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 226 insertions(+)
+ create mode 100644 part2/Makefile
+ create mode 100644 part2/http-client.c
+
+diff --git a/part2/Makefile b/part2/Makefile
+new file mode 100644
+index 0000000..b4cd0c0
+--- /dev/null
++++ b/part2/Makefile
+@@ -0,0 +1,28 @@
++
++#
++# Makefile for lab 6, part 1
++#
++
++CC  = gcc
++CXX = g++
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++
++.PHONY: default
++default: http-client 
++
++# header dependency
++## mdb-lookup-server.o: mdb.h
++
++
++
++.PHONY: clean
++clean:
++	rm -f *.o *~ a.out core http-client
++
++.PHONY: all
++all: clean default
++
++
+diff --git a/part2/http-client.c b/part2/http-client.c
+new file mode 100644
+index 0000000..659b09a
+--- /dev/null
++++ b/part2/http-client.c
+@@ -0,0 +1,198 @@
++/*
++ *  mdb-lookup-server.c 
++ */
++
++#include <ctype.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <assert.h>
++#include <unistd.h>
++#include <sys/wait.h>
++#include <sys/stat.h>
++#include <arpa/inet.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <netdb.h>
++
++
++
++static void die(const char *s) { perror(s); exit(1); }
++
++int main(int argc, char **argv)
++{
++    // ignore SIGPIPE so that we don’t terminate when we call
++    // send() on a disconnected socket.
++    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR) 
++    die("signal() failed");
++
++
++    if (argc != 4) {
++        fprintf(stderr, "usage: %s <server-port>\n", argv[0]);
++        exit(1);
++    }
++
++        
++
++    // 
++    // ---------------------------------------------------------------------------------
++        
++    struct hostent *he;
++    char *serverName = argv[1];
++    // get server ip from server name
++    if ((he = gethostbyname(serverName)) == NULL) {
++        die("gethostbyname failed");
++    }
++    
++    char *serverIP = inet_ntoa(*(struct in_addr *)he->h_addr);
++        
++    unsigned short port = atoi(argv[2]);
++
++    char *path = argv[3];
++
++
++    // strchr
++    const char backslash = '/';
++    char *filename = argv[3] ;
++
++    while((path = strchr(filename, backslash)) != NULL ){
++        
++        //printf("path: %s\n", path);
++        path++;
++        filename = path;
++    }
++
++    path = argv[3]; // ?
++
++    printf("host ip: %s, host name: %s, port: %d, filename: %s \n",serverIP, serverName, port, filename);    
++
++
++
++    // ---------------------------------------------------------------------------------
++
++
++    // Create a socket for TCP connection
++
++    int sock; // socket descriptor
++    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
++        die("socket failed");
++
++    // Construct a server address structure
++
++    struct sockaddr_in servaddr;
++    memset(&servaddr, 0, sizeof(servaddr)); // must zero out the structure
++    servaddr.sin_family      = AF_INET;
++    servaddr.sin_addr.s_addr = inet_addr(serverIP);
++    servaddr.sin_port        = htons(port); // must be in network byte order
++
++    // Establish a TCP connection to the server
++
++    if (connect(sock, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
++        die("connect failed");
++
++    /*
++    char buf[1000];
++    if(recv(sock, buf, sizeof(buf),0 ) > 0){
++        printf("RECEIVE:\n%s", buf);
++    }*/
++
++
++    // ---------------------------------------------------------------------------------
++
++    char request_line[1000]  = "GET ";
++    strcat(request_line, path);
++    strcat(request_line, " HTTP/1.0\r\n");
++
++
++    // Host: the.host.name.you.are.connecting.to:<port_number>
++
++    strcat(request_line, "Host: ");
++    strcat(request_line, serverName);
++    strcat(request_line, ":");
++
++    char num[100];
++    snprintf(num, 100,  "%d", port);
++
++    strcat(request_line, num);
++    strcat(request_line, "\r\n\r\n");
++
++    printf("request:\n%s\n", request_line);    
++    fflush(stdout);
++
++
++    //send()
++    // ---------------------------------------------------------------------------------
++    int len = strlen(request_line);
++    if (send(sock, request_line, len, 0) != len)
++        die("send failed");
++
++
++    // printf("#######");
++    // fflush(stdout);
++
++    /*
++    char buf1[1000];
++    if(recv(sock, buf1, sizeof(buf1),0 ) > 0){
++        printf("RECEIVE:\n%s", buf1);
++    }*/
++
++
++
++    // receive
++    // ---------------------------------------------------------------------------------
++    FILE *fp_sock = fdopen(sock, "r" );
++    char line[1000];
++    // fgets headers
++    if(fgets(line, sizeof(line), fp_sock) != NULL){
++       if ( strstr(line, "200")){
++           printf("successful:\n%s", line);
++       }else{
++           printf("%s", line);
++           close(sock);
++           exit(1);
++       } 
++    }
++    // if 200, then proceed
++    while (fgets(line, sizeof(line), fp_sock ) != NULL ){
++
++        printf("%s", line);
++
++        if(strncmp(line, "\r\n", 2) ){     //line == "\r\n"
++            break;
++        }
++    }
++
++
++    // fread content
++    FILE *fp = fopen(filename, "w+");
++    char buf[4096];
++    if(fp ==0){
++        die("cannot write into");
++    }
++
++    int n;
++    while( (n = fread(buf, 1, sizeof(buf), fp_sock)) > 0){
++
++          if(fwrite(buf, sizeof(buf), 1, fp) < 1){
++              die("fwrite fails");
++          }
++
++    }
++
++    fclose(fp);
++
++
++    // ---------------------------------------------------------------------------------
++
++    fclose(fp_sock);
++    
++    close(sock);
++
++
++    return 0;
++}
+-- 
+2.17.1
+
+
+From 3ce92d37a1e802be29e2fe8f5783ffabd73b6148 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 22:17:29 -0400
+Subject: [PATCH 5/6] remove comment
+
+---
+ part2/http-client.c | 20 ++++++++++++++------
+ 1 file changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/part2/http-client.c b/part2/http-client.c
+index 659b09a..dd0d0a9 100644
+--- a/part2/http-client.c
++++ b/part2/http-client.c
+@@ -69,7 +69,7 @@ int main(int argc, char **argv)
+ 
+     path = argv[3]; // ?
+ 
+-    printf("host ip: %s, host name: %s, port: %d, filename: %s \n",serverIP, serverName, port, filename);    
++    //printf("host ip: %s, host name: %s, port: %d, filename: %s \n",serverIP, serverName, port, filename);    
+ 
+ 
+ 
+@@ -121,8 +121,8 @@ int main(int argc, char **argv)
+     strcat(request_line, num);
+     strcat(request_line, "\r\n\r\n");
+ 
+-    printf("request:\n%s\n", request_line);    
+-    fflush(stdout);
++    //printf("request:\n%s\n", request_line);    
++    //fflush(stdout);
+ 
+ 
+     //send()
+@@ -150,7 +150,7 @@ int main(int argc, char **argv)
+     // fgets headers
+     if(fgets(line, sizeof(line), fp_sock) != NULL){
+        if ( strstr(line, "200")){
+-           printf("successful:\n%s", line);
++           // printf("successful:\n%s", line);
+        }else{
+            printf("%s", line);
+            close(sock);
+@@ -160,9 +160,9 @@ int main(int argc, char **argv)
+     // if 200, then proceed
+     while (fgets(line, sizeof(line), fp_sock ) != NULL ){
+ 
+-        printf("%s", line);
++         //printf("%s", line);
+ 
+-        if(strncmp(line, "\r\n", 2) ){     //line == "\r\n"
++        if((line[0] == '\r') &&( line[1] == '\n') ){     //line == "\r\n"
+             break;
+         }
+     }
+@@ -182,8 +182,16 @@ int main(int argc, char **argv)
+               die("fwrite fails");
+           }
+ 
++          /*
++          printf("%s", buf);
++          if (strcmp( buf, "</html>\n") ==0 ){
++              break;
++
++          }*/
+     }
+ 
++
++
+     fclose(fp);
+ 
+ 
+-- 
+2.17.1
+
+
+From eb643018a7281b6667986eaf9d5bff2f77aed422 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 25 Apr 2022 22:23:53 -0400
+Subject: [PATCH 6/6] readme
+
+---
+ README.txt | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+ create mode 100644 README.txt
+
+diff --git a/README.txt b/README.txt
+new file mode 100644
+index 0000000..3739823
+--- /dev/null
++++ b/README.txt
+@@ -0,0 +1,26 @@
++Yixuan Zou
++
++yz4004
++
++
++For part2, I compare my make.html with jae's. At the bottom there are some
++extra lines:
++
++-----------------------------------------------------
++
++</body>
++</html>
++op"><a href="#Text-Functions">Text Functions</a></td></tr>
++<tr><td></td><td valign="top"><a href="#index-wordlist"><code>wordlist</code></a>:</td><td>&nbsp;</td><td valign="top"><a href="#Text-Functions">Text Functions</a></td></tr>
++<tr><td></td><td valign="top"><a href="#index-words"><code>words</code></a>:</td><td>&nbsp;</td><td valign="top"><a href="#Text-Functions">Text Functions</a></td></tr>
++<tr><td colspan="4"> <hr></td></tr>
++<tr><th id="Name-Index_fn_letter-Y">Y</th><td></td><td></td></tr>
++<tr><td></td><td valign="top"><a href="#index-YACC"><code>YACC</code></a>:</td><td>&nbsp;</td><td valign="top"><a href="#Implicit-Variables">Implicit Variables</a></td></tr>
++<tr><td></td><td valign="top"><a href="#index-YFLAGS"><code>YFLAGS</code></a>:</td><td>&nbsp;</td><td valign="top"><a href="#Implicit-V
++
++-----------------------------------------------------
++
++There are ways to get rid of them and just leave html body.
++But we also assume file may be other binary file.
++I don't know how to deal with this.
++
+-- 
+2.17.1
+

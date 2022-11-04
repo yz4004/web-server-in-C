@@ -1,0 +1,774 @@
+From d3c998e270303d85de5a202ae5a255d4ae38aefa Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 11:55:38 -0500
+Subject: [PATCH 1/8] complete part1
+
+---
+ part1/Makefile |  77 +++++++++++++++++++++++++++
+ part1/main.c   | 138 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 215 insertions(+)
+ create mode 100644 part1/Makefile
+ create mode 100644 part1/main.c
+
+diff --git a/part1/Makefile b/part1/Makefile
+new file mode 100644
+index 0000000..117cc26
+--- /dev/null
++++ b/part1/Makefile
+@@ -0,0 +1,77 @@
++# This Makefile should be used as a template for future Makefiles.
++# It's heavily commented, so hopefully you can understand what each
++# line does.
++
++# We'll use gcc for C compilation and g++ for C++ compilation
++
++CC  = gcc
++CXX = g++
++
++# Let's leave a place holder for additional include directories
++
++INCLUDES =
++
++# Compilation options:
++# -g for debugging info and -Wall enables all warnings
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++# Linking options:
++# -g for debugging info
++
++LDFLAGS = -g
++
++# List the libraries you need to link with in LDLIBS
++# For example, use "-lm" for the math library
++
++LDLIBS =
++
++# The 1st target gets built when you type "make".
++# It's usually your executable.  ("main" in this case.)
++#
++# Note that we did not specify the linking rule.
++# Instead, we rely on one of make's implicit rules:
++#
++#     $(CC) $(LDFLAGS) <all-dependent-.o-files> $(LDLIBS)
++#
++# Also note that make assumes that main depends on main.o,
++# so we can omit it if we want to.
++
++main: main.o 
++	gcc main.o -o isort
++# main.o depends not only on main.c, but also on myadd.h because
++# main.c includes myadd.h.  main.o will get recompiled if either
++# main.c or myadd.h get modified.
++#
++# make already knows main.o depends on main.c, so we can omit main.c
++# in the dependency list if we want to.
++#
++# make uses the following implicit rule to compile a .c file into a .o
++# file:
++#
++#     $(CC) -c $(CFLAGS) <the-.c-file>
++#
++
++main.o: main.c 
++
++# And myadd.o depends on myadd.c and myadd.h.
++
++# myadd.o: myadd.c myadd.h
++
++# Always provide the "clean" target that removes intermediate files.
++# What you remove depend on your choice of coding tools
++# (different editors generate different backup files for example).
++#
++# And the "clean" target is not a file name, so we tell make that
++# it's a "phony" target.
++
++.PHONY: clean
++clean:
++	rm -f *.o a.out core main
++
++# "all" target is useful if your Makefile builds multiple programs.
++# Here we'll have it first do "clean", and rebuild the main target.
++
++.PHONY: all
++all: clean main
+diff --git a/part1/main.c b/part1/main.c
+new file mode 100644
+index 0000000..27ddd60
+--- /dev/null
++++ b/part1/main.c
+@@ -0,0 +1,138 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <time.h>
++
++
++int *insertSort(int *a, int size);
++
++void sort_integer_array(int *begin, int *end, int ascending);
++
++int main(){
++
++    srandom(time(NULL));
++
++    // read array size from user
++    int size;
++    printf("Please input size here: ");
++    scanf("%d", &size);
++
++    // create array
++    // int a[size];
++    
++    int *a = (int *) malloc( sizeof(int) * size);
++    if (a == NULL) {
++         perror("malloc returned NULL");
++         exit(1);
++    }
++
++    int r;
++    for(int i=0; i<size; i++){
++
++        r = (int) (random()%100);
++        *(a+i) = r; 
++        printf("%d %d\n", r, *(a+i));
++    }
++
++
++    int *b =(int *)  malloc( sizeof(int) * size);
++    if (b == NULL) {
++         perror("malloc returned NULL");
++         exit(1);
++    }
++    for(int i=0; i<size; i++){
++
++        *(b+i) = *(a+i);
++    }
++
++    int *c = (int *) malloc( sizeof(int)* size);
++    if (c == NULL) {
++         perror("malloc returned NULL");
++         exit(1);
++    }
++    for(int i=0; i<=size; i++){
++        *(c+i) = *(a+i);
++    }
++
++    sort_integer_array(b, b+size, 1); // end b + size - 1
++
++    sort_integer_array(c, c+size, 0);
++
++
++    printf("original:");
++    for(int i=0; i<size; i++){
++        printf("%d  ", a[i]);
++    }
++    printf("\n");
++        
++    printf("ascending: ");
++    for(int i=0; i<size; i++){
++        printf("%d  ", b[i]);
++    }
++    printf("\n");
++
++    printf("descending: ");
++    for(int i=0; i<size; i++){
++        printf("%d  ", c[i]);
++    }
++    printf("\n");
++
++    free(a);
++    free(b);
++    free(c);
++
++    return 0;
++}
++
++
++
++ /* This function sorts an integer array.
++ 
++ begin points to the 1st element of the array.
++ end points to ONE PAST the last element of the array.
++ If ascending is 1, the array will be sorted in ascending order.
++ If ascending is 0, the array will be sorted in descending order.
++ */
++ void sort_integer_array(int *begin, int *end, int ascending) 
++ {
++ /* In here, you will call your real sorting function (your own
++ * or the qsort()). Basically, I want to make sure that you
++ * know how to translate the begin/end parameter to whatever
++ * is required for your sorting function.
++ */
++ 
++    
++    int index = 1;
++    int temp;
++    int current;
++    if( ascending){
++
++        while((begin+index) != end ){  // index < size
++
++            temp =*(begin+index);
++            // move current/curser to the place i, where a[i] < a[index] and a[i+1] > a[index]
++            current = index;
++            while((current >0) &  (*(begin + current-1) > temp)){
++                // not index - 1 in last row, but compare a[current-1] in condition, and use lazy &
++                *(begin + current) = *(begin + current-1); // put a[current-1] 1 digit back
++                current--;                 // current move forward
++            }
++        *(begin + current) = temp;
++        index++;
++        }
++    }else{
++        while((begin+index) != end){
++            temp = *(begin + index);
++            // move current/curser to the place i, where a[i] < a[index] and a[i+1] > a[index]
++            current = index;
++            while((current >0) &  (*(begin + current-1) < temp)){
++                // not index - 1 in last row, but compare a[current-1] in condition, and use lazy &
++                *(begin + current) = *(begin + current-1); // put a[current-1] 1 digit back
++                current--;                 // current move forward
++            }
++            *(begin + current) = temp;
++            index++;
++   
++        }
++    }
++
++}
+-- 
+2.17.1
+
+
+From 14a807c2f789002ce63173f65b856eb88f519f76 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 21:04:01 -0500
+Subject: [PATCH 2/8] part2 step1
+
+---
+ part2/Makefile | 77 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ part2/twecho.c |  6 ++++
+ 2 files changed, 83 insertions(+)
+ create mode 100644 part2/Makefile
+
+diff --git a/part2/Makefile b/part2/Makefile
+new file mode 100644
+index 0000000..4f96046
+--- /dev/null
++++ b/part2/Makefile
+@@ -0,0 +1,77 @@
++# This Makefile should be used as a template for future Makefiles.
++# It's heavily commented, so hopefully you can understand what each
++# line does.
++
++# We'll use gcc for C compilation and g++ for C++ compilation
++
++CC  = gcc
++CXX = g++
++
++# Let's leave a place holder for additional include directories
++
++INCLUDES =
++
++# Compilation options:
++# -g for debugging info and -Wall enables all warnings
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++# Linking options:
++# -g for debugging info
++
++LDFLAGS = -g
++
++# List the libraries you need to link with in LDLIBS
++# For example, use "-lm" for the math library
++
++LDLIBS =
++
++# The 1st target gets built when you type "make".
++# It's usually your executable.  ("main" in this case.)
++#
++# Note that we did not specify the linking rule.
++# Instead, we rely on one of make's implicit rules:
++#
++#     $(CC) $(LDFLAGS) <all-dependent-.o-files> $(LDLIBS)
++#
++# Also note that make assumes that main depends on main.o,
++# so we can omit it if we want to.
++
++main: twecho.o 
++	gcc twecho.o -o twecho
++# main.o depends not only on main.c, but also on myadd.h because
++# main.c includes myadd.h.  main.o will get recompiled if either
++# main.c or myadd.h get modified.
++#
++# make already knows main.o depends on main.c, so we can omit main.c
++# in the dependency list if we want to.
++#
++# make uses the following implicit rule to compile a .c file into a .o
++# file:
++#
++#     $(CC) -c $(CFLAGS) <the-.c-file>
++#
++
++twecho.o: twecho.c 
++
++# And myadd.o depends on myadd.c and myadd.h.
++
++# myadd.o: myadd.c myadd.h
++
++# Always provide the "clean" target that removes intermediate files.
++# What you remove depend on your choice of coding tools
++# (different editors generate different backup files for example).
++#
++# And the "clean" target is not a file name, so we tell make that
++# it's a "phony" target.
++
++.PHONY: clean
++clean:
++	rm -f *.o a.out core main
++
++# "all" target is useful if your Makefile builds multiple programs.
++# Here we'll have it first do "clean", and rebuild the main target.
++
++.PHONY: all
++all: clean main
+diff --git a/part2/twecho.c b/part2/twecho.c
+index c70e975..741f7a5 100644
+--- a/part2/twecho.c
++++ b/part2/twecho.c
+@@ -10,6 +10,12 @@
+ static char **duplicateArgs(int argc, char **argv)
+ {
+ 
++/*
++    while(*argv){
++        printf("%s\n", *argv++);
++    } 
++*/
++    return argv;
+ }
+ 
+ static void freeDuplicatedArgs(char **copy)
+-- 
+2.17.1
+
+
+From a399955d3253134fb2f380a0903180094256bece Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 21:42:55 -0500
+Subject: [PATCH 3/8] Add reference for sort algorithm
+
+---
+ part1/main.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/part1/main.c b/part1/main.c
+index 27ddd60..9a99813 100644
+--- a/part1/main.c
++++ b/part1/main.c
+@@ -2,9 +2,6 @@
+ #include <stdlib.h>
+ #include <time.h>
+ 
+-
+-int *insertSort(int *a, int size);
+-
+ void sort_integer_array(int *begin, int *end, int ascending);
+ 
+ int main(){
+@@ -24,16 +21,14 @@ int main(){
+          perror("malloc returned NULL");
+          exit(1);
+     }
+-
+     int r;
+     for(int i=0; i<size; i++){
+ 
+         r = (int) (random()%100);
+         *(a+i) = r; 
+-        printf("%d %d\n", r, *(a+i));
++        //printf("%d %d\n", r, *(a+i));
+     }
+ 
+-
+     int *b =(int *)  malloc( sizeof(int) * size);
+     if (b == NULL) {
+          perror("malloc returned NULL");
+@@ -98,6 +93,11 @@ int main(){
+  * or the qsort()). Basically, I want to make sure that you
+  * know how to translate the begin/end parameter to whatever
+  * is required for your sorting function.
++ *
++ *
++ * Insertion Sort. 
++ * From the lecture note of COMSW 3134
++ *
+  */
+  
+     
+-- 
+2.17.1
+
+
+From 35a35e52ad2bfe8de3a6637c8a9c9880ef8e4411 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 22:42:59 -0500
+Subject: [PATCH 4/8] finishing part2 step2
+
+---
+ part2/twecho | Bin 0 -> 11392 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100755 part2/twecho
+
+diff --git a/part2/twecho b/part2/twecho
+new file mode 100755
+index 0000000000000000000000000000000000000000..18e341b1f659368d3eee676f9fff61ac9ff6b5ca
+GIT binary patch
+literal 11392
+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
+NR#+PMIt(1F_#c<#3$*|M
+
+literal 0
+HcmV?d00001
+
+-- 
+2.17.1
+
+
+From b127a0261a06feb9ce83dff6f2a7c2dc5491982e Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 23:14:24 -0500
+Subject: [PATCH 5/8] finishing part2
+
+---
+ part2/twecho.c | 37 +++++++++++++++++++++++++++++++------
+ 1 file changed, 31 insertions(+), 6 deletions(-)
+
+diff --git a/part2/twecho.c b/part2/twecho.c
+index 741f7a5..7d835b1 100644
+--- a/part2/twecho.c
++++ b/part2/twecho.c
+@@ -9,18 +9,43 @@
+ 
+ static char **duplicateArgs(int argc, char **argv)
+ {
++       
++
++    // allocate & copy vertical array
++    char **a = malloc( sizeof(char *) * (argc -1)); 
++    //argv++;
++    int j = 1;
++    while( j<argc ){
++        //*a = *argv;
++
++        int len = strlen(argv[j]);
++        char *p = malloc( sizeof(char) * len);
++
++        int i = 0;
++        while(i < len){
++            *(p+i) = toupper( argv[j][i]); // p++
++            i++;
++        }
++        *(a+j)  = p; 
++
++        j++;
++        //a++;
++        //argv++;
++    }
++    return a;
+ 
+-/*
+-    while(*argv){
+-        printf("%s\n", *argv++);
+-    } 
+-*/
+-    return argv;
+ }
+ 
+ static void freeDuplicatedArgs(char **copy)
+ {
+ 
++    //char *q = *copy;
++
++    while(*copy){
++
++        free(*copy++);
++    }
++    free(copy);
+ }
+ 
+ /*
+-- 
+2.17.1
+
+
+From 0ebda97182471a193a16a6f2545a0bff4cf262ac Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 23:16:55 -0500
+Subject: [PATCH 6/8] Modifying README
+
+---
+ README.txt | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/README.txt b/README.txt
+index 66dfd3e..41ba02f 100644
+--- a/README.txt
++++ b/README.txt
+@@ -8,4 +8,11 @@ This file should contain:
+ The description should indicate whether your solution for the part is
+ working or not.  You may also want to include anything else you would
+ like to communicate to the grader such as extra functionalities you
+-implemented or how you tried to fix your non-working code.
++implemented or how you tried to fix your non-working code. 
++
++Yixuan Zou
++yz4004
++lab2
++
++part1 works
++part2 works
+-- 
+2.17.1
+
+
+From 1a61051652ab72d211a461d30e160d3cb39a45c1 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 23:24:39 -0500
+Subject: [PATCH 7/8] remove *twecho
+
+---
+ part2/twecho | Bin 11392 -> 0 bytes
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ delete mode 100755 part2/twecho
+
+diff --git a/part2/twecho b/part2/twecho
+deleted file mode 100755
+index 18e341b1f659368d3eee676f9fff61ac9ff6b5ca..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 11392
+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
+NR#+PMIt(1F_#c<#3$*|M
+
+-- 
+2.17.1
+
+
+From 07690b0374a1202ad4a53aa711de5e35aa599679 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Sat, 19 Feb 2022 23:35:49 -0500
+Subject: [PATCH 8/8] add malloc return checks in part2/twecho
+
+---
+ part2/twecho.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/part2/twecho.c b/part2/twecho.c
+index 7d835b1..ad13829 100644
+--- a/part2/twecho.c
++++ b/part2/twecho.c
+@@ -12,7 +12,13 @@ static char **duplicateArgs(int argc, char **argv)
+        
+ 
+     // allocate & copy vertical array
+-    char **a = malloc( sizeof(char *) * (argc -1)); 
++    char **a = malloc( sizeof(char *) * (argc -1));
++
++    if (a == NULL) {
++        perror("malloc returned NULL");
++        exit(1);
++        }
++
+     //argv++;
+     int j = 1;
+     while( j<argc ){
+@@ -20,6 +26,10 @@ static char **duplicateArgs(int argc, char **argv)
+ 
+         int len = strlen(argv[j]);
+         char *p = malloc( sizeof(char) * len);
++        if (p == NULL) {
++        perror("malloc returned NULL");
++        exit(1);
++        }
+ 
+         int i = 0;
+         while(i < len){
+-- 
+2.17.1
+

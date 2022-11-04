@@ -1,0 +1,1913 @@
+From 9c1b686e24e076e8292f46bee5102b36e24c340f Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 19:33:12 -0400
+Subject: [PATCH 1/7] draft 1
+
+---
+ http-server.c | 731 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 731 insertions(+)
+ create mode 100644 http-server.c
+
+diff --git a/http-server.c b/http-server.c
+new file mode 100644
+index 0000000..3e57ef6
+--- /dev/null
++++ b/http-server.c
+@@ -0,0 +1,731 @@
++/*
++ * http-server.c
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++#include <netdb.h>
++
++#include <assert.h>  
++#include <sys/wait.h>  
++#include <sys/stat.h>
++
++
++#define BUF_SIZE 4096
++
++static void die(const char *msg) {
++    perror(msg);
++    exit(1);
++}
++
++static void printUsage() {
++    fprintf(stderr, "usage: http-server <server_port> <web_root> <mdb-lookup-host> <mdb-lookup-port>\n");
++    fprintf(stderr, "   ex) http-server www.example.com 80 /index.html\n");
++    exit(1);
++}
++
++char* cook_html(int code){ // char* content
++
++    char *html = (char *) malloc(1000 * sizeof(char));
++
++    char *error_code_prompt;
++    if(code == 501)
++        error_code_prompt =  "Not Implemented";
++    if(code == 400)
++        error_code_prompt =  "Bad Request";
++    if(code == 404)
++        error_code_prompt = "Not Found";
++
++
++    snprintf(html, 1000,  //sizeof(html), 
++            "HTTP/1.0 %d %s\r\n"
++            "\r\n"
++            //"<html>\r\n<body>\r\n<h1>%d %s</h1>\r\n</body>\r\n</html>\r\n",
++            "<html><body><h1>%d %s</h1></body></html>",
++            code, error_code_prompt, code, error_code_prompt);
++    printf("\n\n%s\\n\n", html);
++    return html;
++}
++
++
++
++
++
++int main(int argc, char **argv) {
++
++    // Ignore SIGPIPE so that we don’t terminate when we call
++    // send() on a disconnected socket
++    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
++        die("signal() failed"); 
++    
++    if (argc != 5) {
++	printUsage();
++    }
++
++    // Assign server_port and web_root to correct command line arguments
++
++    unsigned short serv_port = atoi(argv[1]);
++    const char *web_root = argv[2];
++    
++
++    // Create a listening socket (also called server socket) 
++
++    int servsock;
++    if ((servsock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
++        die("socket failed");
++
++    // Construct local address structure
++
++    struct sockaddr_in servaddr;
++    memset(&servaddr, 0, sizeof(servaddr));
++    servaddr.sin_family = AF_INET;
++    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); // any network interface
++    servaddr.sin_port = htons(serv_port);
++
++    // Bind to the local address
++
++    if (bind(servsock, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0)
++        die("bind failed");
++
++    // Start listening for incoming connections
++
++    if (listen(servsock, 5 /* queue size for connection requests */ ) < 0)
++        die("listen failed");
++
++    int clntsock;
++    socklen_t clntlen;
++    struct sockaddr_in clntaddr;
++
++
++    // +-------------------------------------------
++    // part2 b
++
++    // create a mdb-lookup-server sock, now I'm a client to mdb-lookup-server, and as a client, I only need server sock.
++
++    char *mdb_serverName = argv[3];
++    char *mdb_serverIP;
++    unsigned short mdb_serverPort = atoi(argv[4]);
++
++
++    int mdb_sock;
++    struct sockaddr_in mdb_serverAddr;
++    struct hostent *mdb_he;
++    // char buf_2[BUF_SIZE];                    // necessary?
++
++     
++    // get mdb-lookup server ip from mdb-server name
++    if ((mdb_he = gethostbyname(mdb_serverName)) == NULL) {
++	die("gethostbyname failed");
++    }
++    mdb_serverIP = inet_ntoa(*(struct in_addr *)mdb_he->h_addr);
++
++    /* for debugging
++       printf("1: %s\n", mdb_serverName);
++       printf("2: %s\n", mdb_serverIP);
++       printf("3: %s\n", mdb_serverPort);
++       printf("4: %s\n", filePath);
++       printf("5: %s\n", fname);
++       */
++
++
++    // create socket
++    if ((mdb_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
++	die("socket failed");
++    }
++
++
++    // construct mdb-lookup server address
++    memset(&mdb_serverAddr, 0, sizeof(mdb_serverAddr));
++    mdb_serverAddr.sin_family = AF_INET;
++    mdb_serverAddr.sin_addr.s_addr = inet_addr(mdb_serverIP);
++    mdb_serverAddr.sin_port = htons(mdb_serverPort);
++
++    // connect
++    if (connect(mdb_sock, (struct sockaddr *)&mdb_serverAddr, sizeof(mdb_serverAddr)) < 0) {
++	die("connect failed");
++    }
++
++    
++    
++    // wrap the socket with a file* so that we can read the socket using fgets()
++    FILE *fd_mdb;
++    if ((fd_mdb = fdopen(mdb_sock, "r")) == NULL) {
++	die("fdopen failed mdb_sock");
++    }
++
++
++
++    // +-------------------------------------------
++
++    int count = 0;
++    while (1) {
++
++        printf("\n$ %d \n", count++);
++
++        char buf[4096];
++
++
++        // Accept an incoming connection
++
++        clntlen = sizeof(clntaddr); // initialize the in-out parameter
++
++        if ((clntsock = accept(servsock,
++                        (struct sockaddr * ) &clntaddr, &clntlen)) < 0){
++            //perror("next clinet");
++            //die("accept fail");
++            continue; 
++        }
++
++        // accept() returned a connected socket (also called client socket)
++        // and filled in the client's address into clntaddr
++
++
++        // fd_clntsock, for clnt/browser
++        FILE *fd_clntsock;  
++        if ((fd_clntsock = fdopen(clntsock, "r")) == NULL) {   
++           // if i cannot open clntsock, is it a clnt crash issue? No, my problem. die 
++            die("fdopen failed");
++        }
++
++
++
++        // read GET request from FILE *fd_clntsock, clnt request from browser
++        char requestLine[1000]; 
++        if(fgets(requestLine, sizeof(requestLine), fd_clntsock) == NULL ){
++            // fail to read request line, (maybe clnt crash/close connection -- fail to send request), skip current clnt to next one.
++            fprintf(stderr, "clnt crashes");
++            //fclose(fd_clntsock); no need
++            continue;
++        }
++
++        // parse browser http request line
++        char *token_separators = "\t \r\n"; // tab, space, new line
++        char *method = strtok(requestLine, token_separators);
++        //  printf("1 method:(%s)", method);
++        // printf("1 requestLine:(%s)", requestLine);
++       
++        char *requestURI = strtok(NULL, token_separators);
++        // printf("2 requestURI:(%s)", requestURI);
++        // printf("2 requestLine:(%s)", requestLine);
++       
++        char *httpVersion = strtok(NULL, token_separators);
++        // printf("3 httpVersion:(%s)", httpVersion);
++        // printf("3 requestLine:(%s)", requestLine);
++
++        /*
++           1 method:(GET)
++           1 requestLine:(GET)
++           2 requestURI:(/~yz4004/cs3157/tng/index.html)
++           2 requestLine:(GET)
++           3 httpVersion:(HTTP/1.1)
++           3 requestLine:(GET)$ 1*/
++
++        // print log through stderr, whether it's legal or not. if wrong put error code later.
++        fprintf(stderr, "%s \"%s %s\" ",
++                inet_ntoa(clntaddr.sin_addr),
++                method,
++                requestURI);
++
++
++
++
++/*
++           int html_size ; 
++           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) != 0 ){
++             printf("html: \n%s", buf);
++           } 
++           fflush(stdout);
++  
++*/
++           
++
++
++        // Now parse method and httpVersion first, and then requestURI. 
++        // 1. check GET keyword
++        if (strncmp(method, "GET", 3) != 0 ){ // 
++
++            // fclose(fd_clntsock); no need to turn this off, since this clnt fails, we continue to next clnt (while 1)
++            // fd_clntsock created again & cover old one. Not simple die program
++            // as long as program keep running, no need to close/free since we do that at the end, unless die program.
++
++            // send error 501 http to clnt & output log
++            fprintf(stderr, "%d\n", 501); 
++
++            char *html_501 = 
++                "HTTP/1.0 501 Not Implemented"
++                "<html><body><h1>501 Not Implemented</h1></body></html>";
++
++            //printf("html : \n%s",html);
++            if (send(clntsock, html_501, strlen(html_501), 0) != strlen(html_501)){
++                die("send content failed");
++            }
++
++            continue;
++        }
++      
++        // 2. check whether http 1.0 or 1.1 protocol
++        if (strncmp("HTTP/1.0", httpVersion, 8) != 0 && strncmp("HTTP/1.1", httpVersion, 8) != 0) {
++        
++            fprintf(stderr, "\"%s %s %s\" %d\n",method, requestURI, httpVersion, 501); 
++          
++            fclose(fd_clntsock);
++           
++
++           
++            char *html = cook_html(501);
++           
++            //size = snprintf(buf, sizeof(buf),"%s" , html);
++           
++            printf("html : \n%s",html);
++           
++            if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
++          
++                //free(html);
++          
++                die("send content failed");
++          
++            }
++          
++            free(html); 
++          
++            continue;
++       
++        }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++       ///////////////   part 2 b
++
++
++           printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
++
++       // http://clac.cs.columbia.edu:41782/mdb-lookup 
++       if (strcmp(requestURI, "/mdb-lookup") ==0 ){
++
++           printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
++
++           const char *form =
++               "HTTP 200 OK\r\n"
++               "\r\n"
++               "<h1>mdb-lookup</h1>\n"
++               "<p>\n"
++               "<form method=GET action=/mdb-lookup>\n"
++               "lookup: <input type=text name=key>\n"
++               "<input type=submit>\n"
++               "</form>\n"
++               "<p>\n";
++
++           if (send(clntsock, form, strlen(form), 0) != strlen(form) ){
++               die("send content failed");
++           }
++
++
++           printf("\n\n send, you should see search page  \n\n");
++
++
++          continue; 
++       }
++
++
++
++       // http://clac.cs.columbia.edu:41782/mdb-lookup?key=hello 
++       if (strncmp(requestURI, "/mdb-lookup?key=",16) ==0 ){
++
++           printf("2222222222222222  (%s), %d\n\n\n", requestURI, strncmp(requestURI, "/mdb-lookup?key=",16 ));
++
++
++        /*
++        FILE *fd_clntsock;  // fp_servsock
++        if ((fd_clntsock = fdopen(clntsock, "r")) == NULL) {   // fp_servsock = fdopen(servsock, "r") 
++            die("fdopen failed");
++        }*/
++
++
++        // printf("why2");
++        // fflush(stdout);
++
++
++        /*
++           int html_size; 
++           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) > 0 ){
++             printf("html: \n%s", buf);
++           }   
++
++
++        printf("||||||||||||||||||||||||||");
++        fflush(stdout);
++        
++        FILE *fd_clntsock_1;  // fp_servsock
++        if ((fd_clntsock_1 = fdopen(clntsock, "r")) == NULL) {   // fp_servsock = fdopen(servsock, "r") 
++            die("fdopen failed");
++        }
++
++
++           // 
++           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock_1) ) != 0 ){
++
++               printf("html: \n%s", buf);
++
++           }*/   
++        
++
++ 
++      
++           /*
++           // int html_size ; 
++           // int i = 0;
++
++
++           // printf("\n%ld, %s \n", fread(buf,1,30,fd_clntsock), buf ); 
++           // printf("\n%ld\n", fread(buf,1,sizeof(buf),fd_clntsock)); 
++
++           // while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) >  0 ){
++
++           printf("_____ %d\n", i++);
++           fflush(stdout);
++             printf("html: \n%s", buf);
++             printf("88888 %d\n", i );
++             fflush(stdout);
++             break;
++             
++           } */ // 为什么 fread fd_clntsock block, 但 fgets 就可以？？ 输入size?  
++
++           /* // 检查 header
++           while(fgets(buf,sizeof(buf), fd_clntsock) != NULL){
++               printf("\nHeaders: %s\n", buf);
++           }
++           fgets(buf,sizeof(buf), fd_clntsock);
++           printf("$$$$$$$$ %s", buf);
++
++           fgets(buf,sizeof(buf), fd_clntsock);
++           printf("*** $$$$$$$$ %s", buf);
++           */
++
++
++        
++        // printf("\n(%s)\n",requestURI);
++
++        for(int i=0; i<16; i++){
++            requestURI++;
++        }
++        strcat(requestURI, "\n");
++        // printf("\n(%s)\n",requestURI);
++
++
++
++        // 我要把东西 search key send 给 mdb-lookup-server
++        //
++
++
++        printf("\n(%s)\n",requestURI);
++
++       // 我已经和 它connect 上了，在 while loop 外面
++    
++    //printf("")    
++    if (send(mdb_sock, requestURI, strlen(requestURI), 0) != strlen(requestURI)) {
++	die("send failed");
++    }
++
++
++
++    /*
++           while(fgets(buf,sizeof(buf), fd_clntsock) != NULL){
++               printf("\nHeaders: %s\n", buf);
++           }
++           */
++           // fgets(buf,sizeof(buf), fd_mdb);
++           // printf("$$$$$$$$ %s", buf);
++
++
++    /*
++           printf("\n\n 11111111111111111111111111111111--------------------------\n\n");
++
++           fgets(buf,sizeof(buf), fd_mdb);
++           printf("*** $$$$$$$$ %s", buf);
++
++           printf("\n\n 22222222222222222222222222222222--------------------------\n\n");
++
++           fgets(buf,sizeof(buf), fd_mdb);
++           printf("*** $$$$$$$$ %s", buf);
++      */
++
++
++
++
++  /*      
++    char html[10000];
++    strcpy(html,
++        "HTTP 200 OK\r\n"       
++        "\r\n"
++               
++        "<h1>mdb-lookup</h1>\n"
++               
++        "<p>\n"
++               
++        "<form method=GET action=/mdb-lookup>\n"
++               
++        "lookup: <input type=text name=key>\n"
++               
++        "<input type=submit>\n"
++               
++        "</form>\n"
++               
++        "<p>\n"
++
++        "<p><table border>\n");
++
++
++        printf("0000000000000000000000000000000000000000000000000000000000000000\n");
++    char row[100];
++    while(fgets(buf, sizeof(buf), fd_mdb)!= NULL ){
++
++        if( strcmp(buf, "\n") == 0){
++            printf("\n\n end \n\n");
++            break;
++        }
++
++        snprintf(row, sizeof(row), "<tr><td> %s\n", buf);
++        printf("%s\n", row );
++        strcat(html, row);
++
++      
++        
++    }
++
++    strcat(html, "</table>\n</body>\n</html>");
++
++
++    printf("\n\n%s\n\n", html);
++*/
++
++
++
++    
++    strcpy(buf,
++        "HTTP 200 OK\r\n"       
++        "\r\n"
++               
++        "<h1>mdb-lookup</h1>\n"
++               
++        "<p>\n"
++               
++        "<form method=GET action=/mdb-lookup>\n"
++               
++        "lookup: <input type=text name=key>\n"
++               
++        "<input type=submit>\n"
++               
++        "</form>\n"
++               
++        "<p>\n"
++
++        "<p><table border>\n");
++
++    
++
++           
++    if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
++    
++        perror("send content failed");
++
++        break;
++
++    }
++
++    char row[100];
++    while(fgets(row, sizeof(row), fd_mdb)!= NULL){
++
++        if( strcmp(row, "\n") == 0){
++            printf("\n\n end \n\n");
++            break;
++        }
++
++
++        snprintf(buf, sizeof(buf), "<tr><td> %s\n", row);
++        //printf("%s\n", row) ;
++        //strcat(html, row);
++
++
++    if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
++    
++        perror("send content failed");
++
++        break;
++
++    }
++    }
++
++
++
++
++
++
++
++
++
++
++        continue; 
++       }
++
++
++
++       
++       ////////////////////////////////////////////
++
++
++
++
++
++
++
++
++
++
++
++       // check requestURI !!!!!!!!!!!!!!!!
++       //
++       
++       // check web_root
++
++
++
++
++
++
++
++
++
++      
++
++
++
++
++
++       // printf("\nweb_root %s\n", web_root);
++
++
++       // log print out
++       fprintf(stderr, "\"%s %s %s\" %d OK\n",method, requestURI, httpVersion, 200);
++
++       // retrive the file -- requestURI
++       // 1. make path
++       char full_path[100];  // should not be " char *full_path;" has to have len
++       strcpy(full_path, web_root);
++       strcat(full_path, requestURI);  // char *file_path = strcat(web_root, requestURI);
++
++
++
++       // int stat(const char *path, struct stat *buf);
++       // success returns 0 & fill buf, error return -1
++       // reference: https://www.ibm.com/docs/en/i/7.3?topic=ssw_ibm_i_73/apis/stat.htm 
++       struct stat status;
++       char full_path_1[strlen(full_path)];
++       strcpy(full_path_1, full_path);
++
++
++
++       // check ending char of path is '/' or not, return 400 error code    
++       if(full_path_1[strlen(full_path_1)-1] == '/' ){
++           // if ending with '/', attach index.html
++           strcat(full_path_1, "index.html");
++           // printf("***********%s\n", full_path_1);
++
++       }
++       /*
++       else{
++           // else send 400 error code
++           char *html = cook_html(400);
++           printf("html : \n%s",html);
++           if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
++               free(html);
++               die("send content failed");
++           }
++           free(html); 
++           fclose(fd_clntsock);
++           continue;
++       }*/
++
++
++
++       // if path/file exists, proceeds, else  
++       if(stat(full_path_1, &status) == 0){ // succeeds -- file exists, then check directory/file
++
++           printf("**********  %s", full_path_1 );
++
++           // full_path ends with / or not
++           // printf("***********%s\n",full_path_1);
++           // printf("%c, %c\n", '/',full_path_1[strlen(full_path_1)-1] );
++           // if(full_path_1[strlen(full_path_1)-1] == '/' ){
++           //        strcat(full_path_1, "index.html");
++           //        // printf("***********%s\n", full_path_1);
++           // }
++       }else{
++
++           //printf("\nfail does not exists:  %s\n", full_path_1 );
++
++           char *html = cook_html(404);
++           printf("html : \n%s",html);
++           if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
++               //free(html);
++               die("send content failed");
++           }
++           free(html); 
++           fclose(fd_clntsock);
++           continue;
++       } 
++
++       // 2. send response headers
++       snprintf(buf, sizeof(buf), 
++               "HTTP/1.0 200 OK\r\n"
++               "\r\n");
++
++       // 3. open file, read & send
++       // printf("\nfull_path_1: %s\n", full_path_1);
++       // printf("\nstat code: %d\n", stat(full_path_1, &status));
++       FILE *file_requested = fopen(full_path_1, "rb");
++       if( file_requested == NULL) 
++               die("fail open file");
++       int size_read;
++
++       size_read = strlen(buf); // should be 19, header 
++       do{
++           printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
++           if( send(clntsock, buf, size_read, 0) != size_read ){
++               perror("send content failed");
++               break;
++           }
++       }while(( size_read = fread(buf,1, sizeof(buf), file_requested)) > 0);
++
++
++       //if(feof(file_requested) )
++       //    printf("file has not been fully read");
++
++       fclose(file_requested);
++       fclose(fd_clntsock);
++
++       fclose(fd_mdb);
++
++
++    }// while (1)
++
++    return 0;
++}
+-- 
+2.17.1
+
+
+From dbe85f545b93c3d04f51b3eae63e7c4adce22c71 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 19:33:36 -0400
+Subject: [PATCH 2/7] add makefile
+
+---
+ Makefile | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+ create mode 100644 Makefile
+
+diff --git a/Makefile b/Makefile
+new file mode 100644
+index 0000000..a95373e
+--- /dev/null
++++ b/Makefile
+@@ -0,0 +1,29 @@
++
++#
++# Makefile for lab 7, part 2
++#
++
++CC  = gcc
++CXX = g++
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++
++.PHONY: default
++default: http-server 
++
++# header dependency
++## mdb-lookup-server.o: mdb.h
++
++
++
++.PHONY: clean
++clean:
++	rm -f *.o *~ a.out core http-server
++
++.PHONY: all
++all: clean default
++
++
++
+-- 
+2.17.1
+
+
+From 997c897e237b0e985f14ca4ea8e49e938dadd939 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 21:33:39 -0400
+Subject: [PATCH 3/7] finish part2
+
+---
+ http-server.c | 500 ++++++++++++++------------------------------------
+ 1 file changed, 141 insertions(+), 359 deletions(-)
+
+diff --git a/http-server.c b/http-server.c
+index 3e57ef6..befd329 100644
+--- a/http-server.c
++++ b/http-server.c
+@@ -162,10 +162,10 @@ int main(int argc, char **argv) {
+ 
+     // +-------------------------------------------
+ 
+-    int count = 0;
++    //int count = 0;
+     while (1) {
+ 
+-        printf("\n$ %d \n", count++);
++        //printf("\n$ %d \n", count++);
+ 
+         char buf[4096];
+ 
+@@ -234,17 +234,6 @@ int main(int argc, char **argv) {
+ 
+ 
+ 
+-/*
+-           int html_size ; 
+-           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) != 0 ){
+-             printf("html: \n%s", buf);
+-           } 
+-           fflush(stdout);
+-  
+-*/
+-           
+-
+-
+         // Now parse method and httpVersion first, and then requestURI. 
+         // 1. check GET keyword
+         if (strncmp(method, "GET", 3) != 0 ){ // 
+@@ -254,15 +243,17 @@ int main(int argc, char **argv) {
+             // as long as program keep running, no need to close/free since we do that at the end, unless die program.
+ 
+             // send error 501 http to clnt & output log
+-            fprintf(stderr, "%d\n", 501); 
++            fprintf(stderr, "%d Not Implemented\n", 501); 
+ 
+             char *html_501 = 
+-                "HTTP/1.0 501 Not Implemented"
++                "HTTP/1.0 501 Not Implemented\r\n\r\n"
+                 "<html><body><h1>501 Not Implemented</h1></body></html>";
+ 
+             //printf("html : \n%s",html);
+             if (send(clntsock, html_501, strlen(html_501), 0) != strlen(html_501)){
+-                die("send content failed");
++               fclose(fd_mdb);
++               fclose(fd_clntsock); 
++               die("send content failed");
+             }
+ 
+             continue;
+@@ -271,58 +262,59 @@ int main(int argc, char **argv) {
+         // 2. check whether http 1.0 or 1.1 protocol
+         if (strncmp("HTTP/1.0", httpVersion, 8) != 0 && strncmp("HTTP/1.1", httpVersion, 8) != 0) {
+         
+-            fprintf(stderr, "\"%s %s %s\" %d\n",method, requestURI, httpVersion, 501); 
+-          
+-            fclose(fd_clntsock);
+-           
++            fprintf(stderr, "%d Not Implemented\n", 501); 
++            char *html_501 = 
++                "HTTP/1.0 501 Not Implemented\r\n\r\n"
++                "<html><body><h1>501 Not Implemented</h1></body></html>";
+ 
+-           
+-            char *html = cook_html(501);
+-           
+-            //size = snprintf(buf, sizeof(buf),"%s" , html);
+-           
+-            printf("html : \n%s",html);
+-           
+-            if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
+-          
+-                //free(html);
+-          
+-                die("send content failed");
+-          
++            if (send(clntsock, html_501, strlen(html_501), 0) != strlen(html_501)){
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
++               die("send content failed");
+             }
+-          
+-            free(html); 
+-          
++
+             continue;
+-       
+         }
+ 
+ 
+ 
++        // 3. check URI starts with /, not ended with /..  not contains /../
+ 
++        //printf("\n||||||| %s\n",requestURI);
++        if (strncmp("/", requestURI, 1) != 0 || strstr(requestURI, "/../") || strstr(requestURI, "/..") )  {
++        
++            fprintf(stderr, "%d Bad Request\n", 400); 
++            char *html_400 = 
++                "HTTP/1.0 400 Bad Request\r\n\r\n"
++                "<html><body><h1>400 Bad Request</h1></body></html>";
++
++            if (send(clntsock, html_400, strlen(html_400), 0) != strlen(html_400)){
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
++               die("send content failed");
++            }
+ 
++            continue;
++        }
+ 
+ 
++        // printf("2333333333333333333333333333"); fflush(stdout);
+ 
+ 
+ 
+-
+-
+-
+-
+-
+-
++         
+ 
+        ///////////////   part 2 b
+ 
+ 
+-           printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
++           //printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
+ 
+        // http://clac.cs.columbia.edu:41782/mdb-lookup 
+        if (strcmp(requestURI, "/mdb-lookup") ==0 ){
+ 
+-           printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
+-
++           //printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
++       
++           fprintf(stderr, "200 OK\n");
+            const char *form =
+                "HTTP 200 OK\r\n"
+                "\r\n"
+@@ -335,296 +327,103 @@ int main(int argc, char **argv) {
+                "<p>\n";
+ 
+            if (send(clntsock, form, strlen(form), 0) != strlen(form) ){
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
+                die("send content failed");
+            }
+ 
+-
+-           printf("\n\n send, you should see search page  \n\n");
+-
+-
+-          continue; 
++           //printf("\n\n send, you should see search page  \n\n");
++           continue; 
++      
+        }
+ 
+ 
+ 
++      
+        // http://clac.cs.columbia.edu:41782/mdb-lookup?key=hello 
+        if (strncmp(requestURI, "/mdb-lookup?key=",16) ==0 ){
+ 
+-           printf("2222222222222222  (%s), %d\n\n\n", requestURI, strncmp(requestURI, "/mdb-lookup?key=",16 ));
+-
+-
+-        /*
+-        FILE *fd_clntsock;  // fp_servsock
+-        if ((fd_clntsock = fdopen(clntsock, "r")) == NULL) {   // fp_servsock = fdopen(servsock, "r") 
+-            die("fdopen failed");
+-        }*/
+-
+-
+-        // printf("why2");
+-        // fflush(stdout);
+-
+-
+-        /*
+-           int html_size; 
+-           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) > 0 ){
+-             printf("html: \n%s", buf);
+-           }   
+-
++           //printf("2222222222222222  (%s), %d\n\n\n", requestURI, strncmp(requestURI, "/mdb-lookup?key=",16 ));
++      
++           // printf("\n(%s)\n",requestURI);
+ 
+-        printf("||||||||||||||||||||||||||");
+-        fflush(stdout);
+         
+-        FILE *fd_clntsock_1;  // fp_servsock
+-        if ((fd_clntsock_1 = fdopen(clntsock, "r")) == NULL) {   // fp_servsock = fdopen(servsock, "r") 
+-            die("fdopen failed");
+-        }
+-
+-
+-           // 
+-           while((html_size = fread(buf,1,sizeof(buf),fd_clntsock_1) ) != 0 ){
+-
+-               printf("html: \n%s", buf);
+-
+-           }*/   
++           for(int i=0; i<16; i++){
++           
++               requestURI++;
+         
+-
+- 
+-      
+-           /*
+-           // int html_size ; 
+-           // int i = 0;
+-
+-
+-           // printf("\n%ld, %s \n", fread(buf,1,30,fd_clntsock), buf ); 
+-           // printf("\n%ld\n", fread(buf,1,sizeof(buf),fd_clntsock)); 
+-
+-           // while((html_size = fread(buf,1,sizeof(buf),fd_clntsock) ) >  0 ){
+-
+-           printf("_____ %d\n", i++);
+-           fflush(stdout);
+-             printf("html: \n%s", buf);
+-             printf("88888 %d\n", i );
+-             fflush(stdout);
+-             break;
+-             
+-           } */ // 为什么 fread fd_clntsock block, 但 fgets 就可以？？ 输入size?  
+-
+-           /* // 检查 header
+-           while(fgets(buf,sizeof(buf), fd_clntsock) != NULL){
+-               printf("\nHeaders: %s\n", buf);
+            }
+-           fgets(buf,sizeof(buf), fd_clntsock);
+-           printf("$$$$$$$$ %s", buf);
+-
+-           fgets(buf,sizeof(buf), fd_clntsock);
+-           printf("*** $$$$$$$$ %s", buf);
+-           */
+-
+-
++           
++       
++           strcat(requestURI, "\n");
+         
+-        // printf("\n(%s)\n",requestURI);
+-
+-        for(int i=0; i<16; i++){
+-            requestURI++;
+-        }
+-        strcat(requestURI, "\n");
+-        // printf("\n(%s)\n",requestURI);
+-
++           // printf("\n(%s)\n",requestURI);
+ 
++           // send    
+ 
+-        // 我要把东西 search key send 给 mdb-lookup-server
+-        //
+-
+-
+-        printf("\n(%s)\n",requestURI);
+-
+-       // 我已经和 它connect 上了，在 while loop 外面
+     
+-    //printf("")    
+-    if (send(mdb_sock, requestURI, strlen(requestURI), 0) != strlen(requestURI)) {
+-	die("send failed");
+-    }
+-
+-
+-
+-    /*
+-           while(fgets(buf,sizeof(buf), fd_clntsock) != NULL){
+-               printf("\nHeaders: %s\n", buf);
++           if (send(mdb_sock, requestURI, strlen(requestURI), 0) != strlen(requestURI)) {
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
++               die("send failed");
+            }
+-           */
+-           // fgets(buf,sizeof(buf), fd_mdb);
+-           // printf("$$$$$$$$ %s", buf);
+-
+-
+-    /*
+-           printf("\n\n 11111111111111111111111111111111--------------------------\n\n");
+-
+-           fgets(buf,sizeof(buf), fd_mdb);
+-           printf("*** $$$$$$$$ %s", buf);
+-
+-           printf("\n\n 22222222222222222222222222222222--------------------------\n\n");
+-
+-           fgets(buf,sizeof(buf), fd_mdb);
+-           printf("*** $$$$$$$$ %s", buf);
+-      */
+-
+-
+-
+-
+-  /*      
+-    char html[10000];
+-    strcpy(html,
+-        "HTTP 200 OK\r\n"       
+-        "\r\n"
+-               
+-        "<h1>mdb-lookup</h1>\n"
+-               
+-        "<p>\n"
+-               
+-        "<form method=GET action=/mdb-lookup>\n"
+-               
+-        "lookup: <input type=text name=key>\n"
+-               
+-        "<input type=submit>\n"
+-               
+-        "</form>\n"
+-               
+-        "<p>\n"
+-
+-        "<p><table border>\n");
+-
+-
+-        printf("0000000000000000000000000000000000000000000000000000000000000000\n");
+-    char row[100];
+-    while(fgets(buf, sizeof(buf), fd_mdb)!= NULL ){
+-
+-        if( strcmp(buf, "\n") == 0){
+-            printf("\n\n end \n\n");
+-            break;
+-        }
+-
+-        snprintf(row, sizeof(row), "<tr><td> %s\n", buf);
+-        printf("%s\n", row );
+-        strcat(html, row);
+-
+-      
+-        
+-    }
+-
+-    strcat(html, "</table>\n</body>\n</html>");
+-
+-
+-    printf("\n\n%s\n\n", html);
+-*/
+-
+-
+-
+-    
+-    strcpy(buf,
+-        "HTTP 200 OK\r\n"       
+-        "\r\n"
+-               
+-        "<h1>mdb-lookup</h1>\n"
+-               
+-        "<p>\n"
+-               
+-        "<form method=GET action=/mdb-lookup>\n"
+-               
+-        "lookup: <input type=text name=key>\n"
+-               
+-        "<input type=submit>\n"
+-               
+-        "</form>\n"
+-               
+-        "<p>\n"
+-
+-        "<p><table border>\n");
+-
++          
++       
++           fprintf(stderr, "200 OK\n");
++           strcpy(buf,
++                   "HTTP/1.0 200 OK\r\n"     
++                   "\r\n"
++                   "<h1>mdb-lookup</h1>\n"
++                   "<p>\n"
++                   "<form method=GET action=/mdb-lookup>\n"
++                   "lookup: <input type=text name=key>\n"
++                   "<input type=submit>\n"
++                   "</form>\n"
++                   "<p>\n"
++                   "<p><table border>\n");
+     
++           if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
++               die("send contenct failed 2b)");
++           }
+ 
++   
+            
+-    if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
+-    
+-        perror("send content failed");
+-
+-        break;
+-
+-    }
+-
+-    char row[100];
+-    while(fgets(row, sizeof(row), fd_mdb)!= NULL){
+-
+-        if( strcmp(row, "\n") == 0){
+-            printf("\n\n end \n\n");
+-            break;
+-        }
+-
+-
+-        snprintf(buf, sizeof(buf), "<tr><td> %s\n", row);
+-        //printf("%s\n", row) ;
+-        //strcat(html, row);
+-
++          
++           
++           char row[100];
++          
++           int even = 0;
++           
++           while(fgets(row, sizeof(row), fd_mdb)!= NULL){
++               if( strcmp(row, "\n") == 0){
++                   //printf("\n\n end \n\n");
++                   break;
++               }
+ 
+-    if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
++               if(even++%2 == 0){
++               
++                   snprintf(buf, sizeof(buf), "<tr><td> %s\n", row);
++               }else{
++                   snprintf(buf, sizeof(buf), "<tr><td  bgcolor=yellow> %s\n", row);
++
++               }
++               if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
++                   fclose(fd_mdb);
++                   fclose(fd_clntsock);
++                   die("send contenct failed 2b)");
++               }
+     
+-        perror("send content failed");
+-
+-        break;
+-
+-    }
+-    }
+-
+-
+-
+-
+-
+-
+-
+-
++           }
+ 
+ 
+         continue; 
+-       }
+-
+-
+-
+-       
+-       ////////////////////////////////////////////
++       }// end if ./mdb-lookup?key=
+ 
+ 
+ 
+-
+-
+-
+-
+-
+-
+-
+-
+-       // check requestURI !!!!!!!!!!!!!!!!
+-       //
+-       
+-       // check web_root
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-      
+-
+-
+-
+-
+-
+-       // printf("\nweb_root %s\n", web_root);
+-
+-
+-       // log print out
+-       fprintf(stderr, "\"%s %s %s\" %d OK\n",method, requestURI, httpVersion, 200);
++       // part2 a) continue  //////////
+ 
+        // retrive the file -- requestURI
+        // 1. make path
+@@ -633,7 +432,6 @@ int main(int argc, char **argv) {
+        strcat(full_path, requestURI);  // char *file_path = strcat(web_root, requestURI);
+ 
+ 
+-
+        // int stat(const char *path, struct stat *buf);
+        // success returns 0 & fill buf, error return -1
+        // reference: https://www.ibm.com/docs/en/i/7.3?topic=ssw_ibm_i_73/apis/stat.htm 
+@@ -643,89 +441,73 @@ int main(int argc, char **argv) {
+ 
+ 
+ 
+-       // check ending char of path is '/' or not, return 400 error code    
++       // check ending char of path is '/', if true, concat  index.html 
+        if(full_path_1[strlen(full_path_1)-1] == '/' ){
+-           // if ending with '/', attach index.html
+            strcat(full_path_1, "index.html");
+-           // printf("***********%s\n", full_path_1);
+-
+        }
+-       /*
+-       else{
+-           // else send 400 error code
+-           char *html = cook_html(400);
+-           printf("html : \n%s",html);
+-           if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
+-               free(html);
+-               die("send content failed");
+-           }
+-           free(html); 
+-           fclose(fd_clntsock);
+-           continue;
+-       }*/
+-
+-
+-
++       
++       
+        // if path/file exists, proceeds, else  
+-       if(stat(full_path_1, &status) == 0){ // succeeds -- file exists, then check directory/file
+-
+-           printf("**********  %s", full_path_1 );
++       if(stat(full_path_1, &status) == 0){ // succeeds -- stat return none 0,  file not exists, then check directory/file
+ 
+-           // full_path ends with / or not
+-           // printf("***********%s\n",full_path_1);
+-           // printf("%c, %c\n", '/',full_path_1[strlen(full_path_1)-1] );
+-           // if(full_path_1[strlen(full_path_1)-1] == '/' ){
+-           //        strcat(full_path_1, "index.html");
+-           //        // printf("***********%s\n", full_path_1);
+-           // }
++           //printf("**********  %s", full_path_1 );
++       
+        }else{
+ 
+            //printf("\nfail does not exists:  %s\n", full_path_1 );
++            fprintf(stderr, "%d Not Found\n", 404); 
++            char *html_404 = 
++                "HTTP/1.0 404 Not Found\r\n\r\n"
++                "<html><body><h1>404 Not Found</h1></body></html>";
++
++            if (send(clntsock, html_404, strlen(html_404), 0) != strlen(html_404)){
++                   fclose(fd_mdb);
++                   fclose(fd_clntsock);
++                   die("send content failed");
++            }
+ 
+-           char *html = cook_html(404);
+-           printf("html : \n%s",html);
+-           if (send(clntsock, html, strlen(html), 0) != strlen(html) ){
+-               //free(html);
+-               die("send content failed");
+-           }
+-           free(html); 
+-           fclose(fd_clntsock);
+-           continue;
++            continue;
+        } 
+ 
+-       // 2. send response headers
++
++       fprintf(stderr, "200 OK\n");
++
++
++       // 2. prepare response headers
+        snprintf(buf, sizeof(buf), 
+                "HTTP/1.0 200 OK\r\n"
+                "\r\n");
+ 
+        // 3. open file, read & send
+-       // printf("\nfull_path_1: %s\n", full_path_1);
+-       // printf("\nstat code: %d\n", stat(full_path_1, &status));
+        FILE *file_requested = fopen(full_path_1, "rb");
+-       if( file_requested == NULL) 
++       if( file_requested == NULL){ 
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
+                die("fail open file");
++       }
+        int size_read;
+ 
+        size_read = strlen(buf); // should be 19, header 
+        do{
+-           printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
++           //printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
+            if( send(clntsock, buf, size_read, 0) != size_read ){
+-               perror("send content failed");
+-               break;
++               fclose(fd_mdb);
++               fclose(fd_clntsock);
++               die("send content failed");
+            }
+        }while(( size_read = fread(buf,1, sizeof(buf), file_requested)) > 0);
+ 
+ 
+-       //if(feof(file_requested) )
+-       //    printf("file has not been fully read");
+-
+        fclose(file_requested);
+        fclose(fd_clntsock);
+ 
+-       fclose(fd_mdb);
+-
+-
++       fprintf(stdout, "\n");
+     }// while (1)
+ 
++       
++    
++
++ 
++    fclose(fd_mdb);
+     return 0;
+ }
+-- 
+2.17.1
+
+
+From 58ac4b4732ec355c52b3dab752eb8e3684cea079 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 22:22:07 -0400
+Subject: [PATCH 4/7] finish test, part2 ab both work on firefox
+
+---
+ http-server.c | 78 +++++++++------------------------------------------
+ 1 file changed, 14 insertions(+), 64 deletions(-)
+
+diff --git a/http-server.c b/http-server.c
+index befd329..7387137 100644
+--- a/http-server.c
++++ b/http-server.c
+@@ -29,30 +29,6 @@ static void printUsage() {
+     exit(1);
+ }
+ 
+-char* cook_html(int code){ // char* content
+-
+-    char *html = (char *) malloc(1000 * sizeof(char));
+-
+-    char *error_code_prompt;
+-    if(code == 501)
+-        error_code_prompt =  "Not Implemented";
+-    if(code == 400)
+-        error_code_prompt =  "Bad Request";
+-    if(code == 404)
+-        error_code_prompt = "Not Found";
+-
+-
+-    snprintf(html, 1000,  //sizeof(html), 
+-            "HTTP/1.0 %d %s\r\n"
+-            "\r\n"
+-            //"<html>\r\n<body>\r\n<h1>%d %s</h1>\r\n</body>\r\n</html>\r\n",
+-            "<html><body><h1>%d %s</h1></body></html>",
+-            code, error_code_prompt, code, error_code_prompt);
+-    printf("\n\n%s\\n\n", html);
+-    return html;
+-}
+-
+-
+ 
+ 
+ 
+@@ -115,7 +91,6 @@ int main(int argc, char **argv) {
+     int mdb_sock;
+     struct sockaddr_in mdb_serverAddr;
+     struct hostent *mdb_he;
+-    // char buf_2[BUF_SIZE];                    // necessary?
+ 
+      
+     // get mdb-lookup server ip from mdb-server name
+@@ -124,15 +99,6 @@ int main(int argc, char **argv) {
+     }
+     mdb_serverIP = inet_ntoa(*(struct in_addr *)mdb_he->h_addr);
+ 
+-    /* for debugging
+-       printf("1: %s\n", mdb_serverName);
+-       printf("2: %s\n", mdb_serverIP);
+-       printf("3: %s\n", mdb_serverPort);
+-       printf("4: %s\n", filePath);
+-       printf("5: %s\n", fname);
+-       */
+-
+-
+     // create socket
+     if ((mdb_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+ 	die("socket failed");
+@@ -300,23 +266,17 @@ int main(int argc, char **argv) {
+ 
+         // printf("2333333333333333333333333333"); fflush(stdout);
+ 
+-
+-
+          
+ 
+        ///////////////   part 2 b
+ 
+-
+-           //printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
+-
+        // http://clac.cs.columbia.edu:41782/mdb-lookup 
+        if (strcmp(requestURI, "/mdb-lookup") ==0 ){
+ 
+            //printf("111111111111111  (%s), %d\n\n\n", requestURI, strcmp(requestURI, "/mdb-lookup"));
+-       
+            fprintf(stderr, "200 OK\n");
+            const char *form =
+-               "HTTP 200 OK\r\n"
++               "HTTP/1.0 200 OK\r\n"
+                "\r\n"
+                "<h1>mdb-lookup</h1>\n"
+                "<p>\n"
+@@ -333,35 +293,24 @@ int main(int argc, char **argv) {
+            }
+ 
+            //printf("\n\n send, you should see search page  \n\n");
++           fclose(fd_clntsock);
+            continue; 
+       
+        }
+ 
+-
+-
+       
+        // http://clac.cs.columbia.edu:41782/mdb-lookup?key=hello 
+        if (strncmp(requestURI, "/mdb-lookup?key=",16) ==0 ){
+ 
+            //printf("2222222222222222  (%s), %d\n\n\n", requestURI, strncmp(requestURI, "/mdb-lookup?key=",16 ));
+-      
+            // printf("\n(%s)\n",requestURI);
+-
+-        
+            for(int i=0; i<16; i++){
+-           
+                requestURI++;
+-        
+            }
+-           
+-       
+            strcat(requestURI, "\n");
+         
+            // printf("\n(%s)\n",requestURI);
+-
+            // send    
+-
+-    
+            if (send(mdb_sock, requestURI, strlen(requestURI), 0) != strlen(requestURI)) {
+                fclose(fd_mdb);
+                fclose(fd_clntsock);
+@@ -388,14 +337,8 @@ int main(int argc, char **argv) {
+                die("send contenct failed 2b)");
+            }
+ 
+-   
+-           
+-          
+-           
+            char row[100];
+-          
+            int even = 0;
+-           
+            while(fgets(row, sizeof(row), fd_mdb)!= NULL){
+                if( strcmp(row, "\n") == 0){
+                    //printf("\n\n end \n\n");
+@@ -417,8 +360,8 @@ int main(int argc, char **argv) {
+     
+            }
+ 
+-
+-        continue; 
++           fclose(fd_clntsock);
++           continue; 
+        }// end if ./mdb-lookup?key=
+ 
+ 
+@@ -454,8 +397,15 @@ int main(int argc, char **argv) {
+        
+        }else{
+ 
++           printf("**********  %s", full_path_1 );
++           fprintf(stderr, "%d Not Found\n", 404); 
++           if( strcmp(full_path,"/mnt/disks/students221/yz4004/html/cs3157/tng/favicon.ico" ) == 0 ){
++
++               break;
++           }
++
++
+            //printf("\nfail does not exists:  %s\n", full_path_1 );
+-            fprintf(stderr, "%d Not Found\n", 404); 
+             char *html_404 = 
+                 "HTTP/1.0 404 Not Found\r\n\r\n"
+                 "<html><body><h1>404 Not Found</h1></body></html>";
+@@ -492,6 +442,7 @@ int main(int argc, char **argv) {
+            //printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
+            if( send(clntsock, buf, size_read, 0) != size_read ){
+                fclose(fd_mdb);
++               fclose(file_requested);
+                fclose(fd_clntsock);
+                die("send content failed");
+            }
+@@ -501,10 +452,9 @@ int main(int argc, char **argv) {
+        fclose(file_requested);
+        fclose(fd_clntsock);
+ 
+-       fprintf(stdout, "\n");
++       //fprintf(stdout, "\n");
+     }// while (1)
+ 
+-       
+     
+ 
+  
+-- 
+2.17.1
+
+
+From edbc31cfe47c1bfb59c17b691baed94f59b45d78 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 22:24:34 -0400
+Subject: [PATCH 5/7] modify README
+
+---
+ README.txt | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/README.txt b/README.txt
+index 66dfd3e..e571053 100644
+--- a/README.txt
++++ b/README.txt
+@@ -9,3 +9,10 @@ The description should indicate whether your solution for the part is
+ working or not.  You may also want to include anything else you would
+ like to communicate to the grader such as extra functionalities you
+ implemented or how you tried to fix your non-working code.
++
++
++Yixuan Zou
++yz4004
++lab7
++
++part2 a) b) both work on firefox.
+-- 
+2.17.1
+
+
+From 2195addaa7c9f6178a534a0e51477319b2fa53fc Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 23:44:57 -0400
+Subject: [PATCH 6/7] modify error prompt
+
+---
+ http-server.c | 79 +++++++++++++++++++++++++++++++++++----------------
+ 1 file changed, 54 insertions(+), 25 deletions(-)
+
+diff --git a/http-server.c b/http-server.c
+index 7387137..ec99309 100644
+--- a/http-server.c
++++ b/http-server.c
+@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
+ 
+         if ((clntsock = accept(servsock,
+                         (struct sockaddr * ) &clntaddr, &clntlen)) < 0){
+-            //perror("next clinet");
++            perror("clinet crash");
+             //die("accept fail");
+             continue; 
+         }
+@@ -164,11 +164,16 @@ int main(int argc, char **argv) {
+         char requestLine[1000]; 
+         if(fgets(requestLine, sizeof(requestLine), fd_clntsock) == NULL ){
+             // fail to read request line, (maybe clnt crash/close connection -- fail to send request), skip current clnt to next one.
+-            fprintf(stderr, "clnt crashes");
+-            //fclose(fd_clntsock); no need
++            // fprintf(stderr, "clnt crashes");
++            fclose(fd_clntsock); //no need?
+             continue;
+         }
+ 
++       // check fgets error 
++       if (ferror(fd_clntsock)){
++           perror("fd_clntsock error");
++       }
++
+         // parse browser http request line
+         char *token_separators = "\t \r\n"; // tab, space, new line
+         char *method = strtok(requestLine, token_separators);
+@@ -217,9 +222,10 @@ int main(int argc, char **argv) {
+ 
+             //printf("html : \n%s",html);
+             if (send(clntsock, html_501, strlen(html_501), 0) != strlen(html_501)){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock); 
+-               die("send content failed");
++               //die("send content failed");
++               perror("send content failed");
+             }
+ 
+             continue;
+@@ -234,9 +240,10 @@ int main(int argc, char **argv) {
+                 "<html><body><h1>501 Not Implemented</h1></body></html>";
+ 
+             if (send(clntsock, html_501, strlen(html_501), 0) != strlen(html_501)){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock);
+-               die("send content failed");
++               //die("send content failed");
++               perror("send content failed");
+             }
+ 
+             continue;
+@@ -255,9 +262,10 @@ int main(int argc, char **argv) {
+                 "<html><body><h1>400 Bad Request</h1></body></html>";
+ 
+             if (send(clntsock, html_400, strlen(html_400), 0) != strlen(html_400)){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock);
+-               die("send content failed");
++               //die("send content failed");
++               perror("send content failed");
+             }
+ 
+             continue;
+@@ -287,9 +295,10 @@ int main(int argc, char **argv) {
+                "<p>\n";
+ 
+            if (send(clntsock, form, strlen(form), 0) != strlen(form) ){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock);
+-               die("send content failed");
++               //die("send content failed");
++               perror("send content failed");
+            }
+ 
+            //printf("\n\n send, you should see search page  \n\n");
+@@ -312,9 +321,10 @@ int main(int argc, char **argv) {
+            // printf("\n(%s)\n",requestURI);
+            // send    
+            if (send(mdb_sock, requestURI, strlen(requestURI), 0) != strlen(requestURI)) {
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock);
+-               die("send failed");
++               //die("send failed");
++               perror("send failed");
+            }
+           
+        
+@@ -332,9 +342,10 @@ int main(int argc, char **argv) {
+                    "<p><table border>\n");
+     
+            if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(fd_clntsock);
+-               die("send contenct failed 2b)");
++               //die("send contenct failed 2b)");
++               perror("send content failed");
+            }
+ 
+            char row[100];
+@@ -353,13 +364,18 @@ int main(int argc, char **argv) {
+ 
+                }
+                if( send(clntsock, buf, strlen(buf), 0) != strlen(buf) ){
+-                   fclose(fd_mdb);
++                   //fclose(fd_mdb);
+                    fclose(fd_clntsock);
+-                   die("send contenct failed 2b)");
++                   //die("send contenct failed 2b)");
++                   perror("send content failed");
+                }
+     
++           } // end while, fget from fb_mdb
++       
++           // check fgets fd_mdb 
++           if (ferror(fd_mdb)){
++               perror("fgets fd_mdb error");
+            }
+-
+            fclose(fd_clntsock);
+            continue; 
+        }// end if ./mdb-lookup?key=
+@@ -397,7 +413,7 @@ int main(int argc, char **argv) {
+        
+        }else{
+ 
+-           printf("**********  %s", full_path_1 );
++           //printf("**********  %s", full_path_1 );
+            fprintf(stderr, "%d Not Found\n", 404); 
+            if( strcmp(full_path,"/mnt/disks/students221/yz4004/html/cs3157/tng/favicon.ico" ) == 0 ){
+ 
+@@ -411,9 +427,10 @@ int main(int argc, char **argv) {
+                 "<html><body><h1>404 Not Found</h1></body></html>";
+ 
+             if (send(clntsock, html_404, strlen(html_404), 0) != strlen(html_404)){
+-                   fclose(fd_mdb);
++                   //fclose(fd_mdb);
+                    fclose(fd_clntsock);
+-                   die("send content failed");
++                   //die("send content failed");
++                   perror("send content failed");
+             }
+ 
+             continue;
+@@ -441,14 +458,27 @@ int main(int argc, char **argv) {
+        do{
+            //printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
+            if( send(clntsock, buf, size_read, 0) != size_read ){
+-               fclose(fd_mdb);
++               //fclose(fd_mdb);
+                fclose(file_requested);
+-               fclose(fd_clntsock);
+-               die("send content failed");
++               perror("send content failed");
++               break;
++               //fclose(fd_clntsock);
++               //die("send content failed");
+            }
+        }while(( size_read = fread(buf,1, sizeof(buf), file_requested)) > 0);
+ 
+ 
++       // fread() returns 0 on EOF or on error
++       // so we need to check if there was an error.
++       if (ferror(file_requested)){
++           //fclose(fd_mdb);
++           fclose(fd_clntsock);
++           //die("fread failed");
++           perror("fread failed");
++       }
++   
++       
++
+        fclose(file_requested);
+        fclose(fd_clntsock);
+ 
+@@ -456,7 +486,6 @@ int main(int argc, char **argv) {
+     }// while (1)
+ 
+     
+-
+  
+     fclose(fd_mdb);
+     return 0;
+-- 
+2.17.1
+
+
+From 1117997b16556f63572b46290f26a6665eb50f62 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Thu, 5 May 2022 23:48:50 -0400
+Subject: [PATCH 7/7] modify error prompt
+
+---
+ http-server.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/http-server.c b/http-server.c
+index ec99309..a09df07 100644
+--- a/http-server.c
++++ b/http-server.c
+@@ -459,7 +459,7 @@ int main(int argc, char **argv) {
+            //printf("\n @@@@@@@@@@@@@@@@@@ %d \n",size_read); 
+            if( send(clntsock, buf, size_read, 0) != size_read ){
+                //fclose(fd_mdb);
+-               fclose(file_requested);
++               //fclose(file_requested);
+                perror("send content failed");
+                break;
+                //fclose(fd_clntsock);
+-- 
+2.17.1
+

@@ -1,0 +1,273 @@
+From 9654ad008a6f32143b687243c065f1aef9e95d15 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 4 Apr 2022 09:03:20 -0400
+Subject: [PATCH 1/5] part1 a)
+
+---
+ part1/mdb-lookup-server-nc.sh | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+ create mode 100755 part1/mdb-lookup-server-nc.sh
+
+diff --git a/part1/mdb-lookup-server-nc.sh b/part1/mdb-lookup-server-nc.sh
+new file mode 100755
+index 0000000..2734c1a
+--- /dev/null
++++ b/part1/mdb-lookup-server-nc.sh
+@@ -0,0 +1,22 @@
++#!/bin/sh
++
++on_ctrl_c() {
++ echo "Ignoring Ctrl-C"
++ }
++ # Call on_ctrl_c() when the interrupt signal is received.
++ # The interrupt signal is sent when you press Ctrl-C.
++ trap on_ctrl_c INT
++
++
++pid=$1
++
++mkfifo mypipe-${pid}
++
++cat  mypipe-${pid}| nc -l ${pid} | ./mdb-lookup-cs3157 > mypipe-${pid}
++
++rm ./mypipe-${pid}
++
++
++
++
++
+-- 
+2.17.1
+
+
+From 53bea0ead71e84d63fb64cb3b036dcc0577141aa Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 4 Apr 2022 09:04:16 -0400
+Subject: [PATCH 2/5] part1 b)
+
+---
+ README.txt | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+ create mode 100644 README.txt
+
+diff --git a/README.txt b/README.txt
+new file mode 100644
+index 0000000..c54440c
+--- /dev/null
++++ b/README.txt
+@@ -0,0 +1,46 @@
++
++
++yz4004 
++
++Yixuan Zou
++
++lab5
++
++
++
++## part1 b)  #################################################################################################################################################
++
++ 3805 27728 27728 27728 ?           -1 Ss       0   0:00  \_ sshd: yz4004 [priv]
++27728 27967 27728 27728 ?           -1 S     5782   0:00  |   \_ sshd: yz4004@pts/159
++27967 28108 28108 28108 pts/159  18299 Ss    5782   0:00  |       \_ -bash
++28108 18299 18299 28108 pts/159  18299 S+    5782   0:00  |           \_ ./mdb-lookup-server-nc-1 10782
++18299 18300 18299 28108 pts/159  18299 S+    5782   0:00  |               \_ /bin/sh ./mdb-lookup-server-nc.sh 10782
++18300 18302 18299 28108 pts/159  18299 S+    5782   0:00  |                   \_ cat mypipe-10782
++18300 18303 18299 28108 pts/159  18299 S+    5782   0:00  |                   \_ nc -l 10782
++18300 18304 18299 28108 pts/159  18299 S+    5782   0:00  |                   \_ /bin/sh ./mdb-lookup-cs3157
++18304 18305 18299 28108 pts/159  18299 S+    5782   0:00  |                       \_ /home/jae/cs3157-pub/bin/mdb-lookup /home/jae/cs3157-pub/bin/mdb-cs3157
++
++my script: mdb-lookup-server-nc.sh
++
++
++
++
++## part1 c)  #################################################################################################################################################
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+-- 
+2.17.1
+
+
+From f9c6a774e8c98d70ab002969b7cac347a24070ec Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 4 Apr 2022 09:04:39 -0400
+Subject: [PATCH 3/5] part1 c) Makefile
+
+---
+ part1/Makefile | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+ create mode 100644 part1/Makefile
+
+diff --git a/part1/Makefile b/part1/Makefile
+new file mode 100644
+index 0000000..62b2e5e
+--- /dev/null
++++ b/part1/Makefile
+@@ -0,0 +1,23 @@
++CC  = gcc
++CXX = g++
++
++INCLUDES =
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++LDFLAGS = -g
++
++mdb-lookup-server-nc-2:  mdb-lookup-server-nc-2.o
++	gcc  mdb-lookup-server-nc-2.o -o mdb-lookup-server-nc-2  
++
++mdb-lookup-server-nc-2.o:  mdb-lookup-server-nc-2.c 
++	gcc -c  mdb-lookup-server-nc-2.c -o  mdb-lookup-server-nc-2.o 
++
++
++.PHONY: clean
++clean:
++	rm -f *.o a.out core main
++
++.PHONY: all
++all: clean main
+-- 
+2.17.1
+
+
+From 751f49b9895b0db960b528af271f2143e7c96c98 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 4 Apr 2022 09:05:22 -0400
+Subject: [PATCH 4/5] part1 c)
+
+---
+ part1/mdb-lookup-server-nc-2.c | 72 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+ create mode 100644 part1/mdb-lookup-server-nc-2.c
+
+diff --git a/part1/mdb-lookup-server-nc-2.c b/part1/mdb-lookup-server-nc-2.c
+new file mode 100644
+index 0000000..39d18de
+--- /dev/null
++++ b/part1/mdb-lookup-server-nc-2.c
+@@ -0,0 +1,72 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/wait.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++static void die(const char* s) {
++	perror(s);
++	exit(1);
++}
++
++
++int main() {
++
++	char buf[100];
++	pid_t pid;
++	
++	pid_t parent_pid;
++
++	printf("port number: ");
++
++	while (fgets(buf, sizeof(buf), stdin) != NULL ) {
++
++
++		
++		if (buf[0] == '\n') {
++			// press enter, parent process goes into waitpid
++			
++			pid_t pid = waitpid((pid_t)-1, NULL, WNOHANG);
++			if (pid > 0) {
++				// -1 if no child has exited. on success, pid is finished child pid
++				printf("[pid=%d] mdb-lookup-server terminated\n", (int)pid); // return the finished child's pid
++			}
++
++		}
++		else {
++
++			if (buf[strlen(buf) - 1] == '\n') {
++				buf[strlen(buf) - 1] = 0;
++			}
++			int port_number = atoi(buf);
++
++			parent_pid = getpid();
++
++			pid = fork();
++
++			if (pid < 0) {
++				die("fork failed");
++			}
++			else if (pid == 0) {
++				// child process
++				execl("./mdb-lookup-server-nc.sh", "mdb-lookup-server-nc.sh", buf , (char*)0);
++				die("execl failed");
++
++			}
++			else {
++				// parent process
++				printf("port number: [pid=%d] mdb-lookup-server started on port %d\n\n",(int) pid, port_number  );
++                                memset(buf, 0, sizeof(buf));
++			}
++		}
++              
++                memset(buf, 0, sizeof(buf));
++		printf("port number: ");
++	}
++
++
++	return 0;
++}
++
++
+-- 
+2.17.1
+
+
+From 55281e817f2ff09018104cacee86b92e34066806 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Mon, 4 Apr 2022 09:24:47 -0400
+Subject: [PATCH 5/5] modify readme
+
+---
+ README.txt | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/README.txt b/README.txt
+index c54440c..6423996 100644
+--- a/README.txt
++++ b/README.txt
+@@ -25,13 +25,6 @@ my script: mdb-lookup-server-nc.sh
+ 
+ 
+ 
+-## part1 c)  #################################################################################################################################################
+-
+-
+-
+-
+-
+-
+ 
+ 
+ 
+-- 
+2.17.1
+

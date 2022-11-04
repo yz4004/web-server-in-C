@@ -1,0 +1,2 @@
+#!/bin/sh
+/home/jae/cs3157-pub/bin/mdb-lookup  /home/jae/cs3157-pub/bin/mdb-cs3157

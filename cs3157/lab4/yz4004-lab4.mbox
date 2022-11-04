@@ -1,0 +1,532 @@
+From ce3ef4533af53689a5693675867c22eb9504a4af Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Tue, 22 Mar 2022 05:51:42 -0400
+Subject: [PATCH 1/5] finishing part1 b
+
+---
+ part1/mdb-lookup.c | 181 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 181 insertions(+)
+ create mode 100644 part1/mdb-lookup.c
+
+diff --git a/part1/mdb-lookup.c b/part1/mdb-lookup.c
+new file mode 100644
+index 0000000..a3b7532
+--- /dev/null
++++ b/part1/mdb-lookup.c
+@@ -0,0 +1,181 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include "mylist.h"
++#include "mdb.h"
++#include <string.h>
++
++
++
++void free_list(struct Node* head) {
++    if (!head) {
++        return;
++    }
++    else {
++        free_list(head->next);
++        free(head->data);
++        free(head);
++    }
++}
++
++
++void traverseList_looking_up(struct List *list, char * string) {
++
++    struct Node* cur = list->head;
++    int i = 1;
++    while (cur != NULL) {
++        struct MdbRec* d = cur-> data;
++
++        if (strstr(d->name, string) || strstr(d->msg, string)) {
++            printf("%3d {%s} said {%s}\n", i,d->name, d->msg);
++        }
++
++       // else{
++       //     printf("%s 这个没有匹配 \n", d->name);
++       // }
++        i++;
++        cur = cur->next;
++    }
++
++}
++
++
++int main( int argc, char** argv)
++{
++        
++
++    // printf("%s\n%s\n",argv[0], argv[1]);
++
++
++    // argv++;
++
++
++    if (argc != 2) {
++        fprintf(stderr, "%s\n", "usage:  mdb-lookup <file_name>");
++        exit(1);
++    }
++
++    char* filename = argv[1];
++    FILE* fp = fopen(filename, "r");
++
++    if (fp == NULL) {
++        perror(filename);
++        exit(1);
++    }
++
++
++    // initialize list
++    struct List list;
++    initList(&list);
++
++
++    struct Node* node = list.head;
++
++    struct MdbRec* record = malloc(40);
++
++
++    // size_t fread(void *p, size_t size, size_t n, FILE *file);
++    // char buffer[40];
++    while (fread(record, 40, 1, fp)) {
++
++        
++
++        node = addAfter(&list, node, record);
++
++        //printf("%s %s \n", record->name, record->msg);
++        //printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
++    
++    
++        //struct MdbRec* record = malloc(40);
++        record = (struct MdbRec*) malloc(40);
++    }
++    free(record);
++
++
++/*    
++    struct MdbRec* record1 = malloc(40);
++   
++    fread(record1, 40, 1, fp);
++
++    struct Node* node1 = addAfter(&list, NULL, record1);
++
++    struct MdbRec* record2 = malloc(40);
++
++    fread(record2, 40, 1, fp);
++
++    struct Node* node2 = addAfter(&list, node1, record2);
++
++    printf("%s\n", (*(struct MdbRec *)(list.head->data)).name);
++
++*/
++
++/*    
++     node->data = (struct MdbRec*) malloc(40);
++
++    // size_t fread(void *p, size_t size, size_t n, FILE *file);
++    while (fread(node->data, 40, 1, fp)) {
++
++        node = addAfter(&list, node, (struct MdbRec*)malloc(40));
++
++        printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
++        //printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
++
++    }
++*/
++    fclose(fp);
++
++
++
++
++    // 用户输入
++    char buf[500];
++    printf("look up: ");
++    while (fgets(buf, 500, stdin) != NULL) {
++
++
++        //printf("%s %ld ", buf, strlen(buf));
++        if (strlen(buf) > 1) { // '\n' count len = 1
++            char keyword[6];
++            strncpy(keyword, buf, strlen(buf) - 1); // buf has last char '\n' before '\0' ('\0' is added by fgets)
++
++            
++            if ((strlen(buf) - 1) > 4) {
++                keyword[5] = '\0';
++            }
++            else {
++                keyword[strlen(buf)-1] = '\0';
++            }
++
++                printf("You are looking for %s, %ld, %ld\n", keyword, strlen(buf), strlen(keyword));
++
++
++                traverseList_looking_up(&list, keyword);
++                memset(keyword, 0, sizeof(keyword));
++        }
++        else {
++            traverseList_looking_up(&list, "");
++        }
++
++        // char buf[500];
++        // char keyword[6];
++        memset(buf, 0, sizeof(buf));
++        // memset(keyword, 0, sizeof(keyword));
++        printf("\nlook up: ");
++    }
++/*
++    
++    int i = 1;
++    struct Node *node11 = list.head;
++    while (node11 != NULL)  {
++        //struct MdbRec* d1 = node1->data;
++        //printf("[%3d] %s %s \n",i++, (char*)d1->name, (char*)d1->msg);
++        printf("[%3d] %s %s \n",i++,  ((struct MdbRec*)(node11->data))->name, ((struct MdbRec*)(node11->data))->msg);
++        
++
++        node11 = node11->next;
++    }
++*/
++
++    free_list(list.head);
++
++    return 0;
++}
+-- 
+2.17.1
+
+
+From 0c782dcaaccc38b71877ea1dbfe43f6d9cabf9ff Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Tue, 22 Mar 2022 22:02:27 -0400
+Subject: [PATCH 2/5] modified README
+
+---
+ README.txt | 86 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 85 insertions(+), 1 deletion(-)
+
+diff --git a/README.txt b/README.txt
+index 66dfd3e..5ce557a 100644
+--- a/README.txt
++++ b/README.txt
+@@ -8,4 +8,88 @@ This file should contain:
+ The description should indicate whether your solution for the part is
+ working or not.  You may also want to include anything else you would
+ like to communicate to the grader such as extra functionalities you
+-implemented or how you tried to fix your non-working code.
++implemented or how you tried to fix your non-working code. 
++
++Yixuan Zou
++yz4004  
++lab4
++
++
++######################################
++
++part1 a):
++Records nserted: 
++229: {yixuan} said {My     OC OC [2~ OD OD }
++230: {yixua  n } said {Hello AP}
++
++
++######################################
++
++
++part1 b):
++
++yz4004@clac ~/cs3157/lab4/part1 $ valgrind --leak-check=yes ./mdb-lookup test_db
++==14087== Memcheck, a memory error detector
++==14087== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
++==14087== Using Valgrind-3.13.0 and LibVEX; rerun with -h for copyright info
++==14087== Command: ./mdb-lookup test_db
++==14087==
++look up:
++   1: {yixuan zou} said {hello}
++   2: {uuu} said {he   OB OB hhhh sfesfe}
++   3: {AP} said {im ap}
++   4: {dfhjfhjssfsefjs} said {bbbbbbbbbbbbbbbbbbbbbbb}
++
++look up: ==14087==
++==14087== HEAP SUMMARY:
++==14087==     in use at exit: 0 bytes in 0 blocks
++==14087==   total heap usage: 13 allocs, 13 frees, 3,376 bytes allocated
++==14087==
++==14087== All heap blocks were freed -- no leaks are possible
++==14087==
++==14087== For counts of detected and suppressed errors, rerun with: -v
++==14087== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
++yz4004@clac ~/cs3157/lab4/part1 $ make
++gcc -c  mdb-lookup.c -o  mdb-lookup.o -I../../lab3/solutions/part1
++gcc  mdb-lookup.o -o mdb-lookup  -lmylist -L../../lab3/solutions/part1
++yz4004@clac ~/cs3157/lab4/part1 $ valgrind --leak-check=yes ./mdb-lookup test_db
++==15744== Memcheck, a memory error detector
++==15744== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
++==15744== Using Valgrind-3.13.0 and LibVEX; rerun with -h for copyright info
++==15744== Command: ./mdb-lookup test_db
++==15744==
++lookup:
++   1: {yixuan zou} said {hello}
++   2: {uuu} said {he   OB OB hhhh sfesfe}
++   3: {AP} said {im ap}
++   4: {dfhjfhjssfsefjs} said {bbbbbbbbbbbbbbbbbbbbbbb}
++
++lookup: ee
++
++lookup: yixuan
++   1: {yixuan zou} said {hello}
++
++lookup: hell
++   1: {yixuan zou} said {hello}
++
++lookup: iii
++
++lookup: uu
++   2: {uuu} said {he   OB OB hhhh sfesfe}
++
++lookup: b
++   4: {dfhjfhjssfsefjs} said {bbbbbbbbbbbbbbbbbbbbbbb}
++
++lookup: ==15744==
++==15744== HEAP SUMMARY:
++==15744==     in use at exit: 0 bytes in 0 blocks
++==15744==   total heap usage: 13 allocs, 13 frees, 3,376 bytes allocated
++==15744==
++==15744== All heap blocks were freed -- no leaks are possible
++==15744==
++==15744== For counts of detected and suppressed errors, rerun with: -v
++==15744== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
++yz4004@clac ~/cs3157/lab4/part1 $
++
++
++
+-- 
+2.17.1
+
+
+From 814f51fdc63362765fc8a57c5f5cf01c4a1c7dcd Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Tue, 22 Mar 2022 22:03:35 -0400
+Subject: [PATCH 3/5] modify some comments
+
+---
+ part1/mdb-lookup.c | 81 ++++------------------------------------------
+ 1 file changed, 6 insertions(+), 75 deletions(-)
+
+diff --git a/part1/mdb-lookup.c b/part1/mdb-lookup.c
+index a3b7532..5df61e9 100644
+--- a/part1/mdb-lookup.c
++++ b/part1/mdb-lookup.c
+@@ -26,12 +26,8 @@ void traverseList_looking_up(struct List *list, char * string) {
+         struct MdbRec* d = cur-> data;
+ 
+         if (strstr(d->name, string) || strstr(d->msg, string)) {
+-            printf("%3d {%s} said {%s}\n", i,d->name, d->msg);
++            printf("%4d: {%s} said {%s}\n", i,d->name, d->msg);
+         }
+-
+-       // else{
+-       //     printf("%s 这个没有匹配 \n", d->name);
+-       // }
+         i++;
+         cur = cur->next;
+     }
+@@ -74,61 +70,16 @@ int main( int argc, char** argv)
+ 
+ 
+     // size_t fread(void *p, size_t size, size_t n, FILE *file);
+-    // char buffer[40];
+     while (fread(record, 40, 1, fp)) {
+-
+-        
+-
+         node = addAfter(&list, node, record);
+-
+-        //printf("%s %s \n", record->name, record->msg);
+-        //printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
+-    
+-    
+-        //struct MdbRec* record = malloc(40);
+         record = (struct MdbRec*) malloc(40);
+     }
+     free(record);
+-
+-
+-/*    
+-    struct MdbRec* record1 = malloc(40);
+-   
+-    fread(record1, 40, 1, fp);
+-
+-    struct Node* node1 = addAfter(&list, NULL, record1);
+-
+-    struct MdbRec* record2 = malloc(40);
+-
+-    fread(record2, 40, 1, fp);
+-
+-    struct Node* node2 = addAfter(&list, node1, record2);
+-
+-    printf("%s\n", (*(struct MdbRec *)(list.head->data)).name);
+-
+-*/
+-
+-/*    
+-     node->data = (struct MdbRec*) malloc(40);
+-
+-    // size_t fread(void *p, size_t size, size_t n, FILE *file);
+-    while (fread(node->data, 40, 1, fp)) {
+-
+-        node = addAfter(&list, node, (struct MdbRec*)malloc(40));
+-
+-        printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
+-        //printf("%s %s \n", ((struct MdbRec*)(node->data))->name, ((struct MdbRec*)(node->data))->msg);
+-
+-    }
+-*/
+     fclose(fp);
+ 
+ 
+-
+-
+-    // 用户输入
+     char buf[500];
+-    printf("look up: ");
++    printf("lookup: ");
+     while (fgets(buf, 500, stdin) != NULL) {
+ 
+ 
+@@ -144,36 +95,16 @@ int main( int argc, char** argv)
+             else {
+                 keyword[strlen(buf)-1] = '\0';
+             }
+-
+-                printf("You are looking for %s, %ld, %ld\n", keyword, strlen(buf), strlen(keyword));
+-
+-
+-                traverseList_looking_up(&list, keyword);
+-                memset(keyword, 0, sizeof(keyword));
++            //printf("You are looking for %s, %ld, %ld\n", keyword, strlen(buf), strlen(keyword));
++            traverseList_looking_up(&list, keyword);
++            memset(keyword, 0, sizeof(keyword));
+         }
+         else {
+             traverseList_looking_up(&list, "");
+         }
+-
+-        // char buf[500];
+-        // char keyword[6];
+         memset(buf, 0, sizeof(buf));
+-        // memset(keyword, 0, sizeof(keyword));
+-        printf("\nlook up: ");
+-    }
+-/*
+-    
+-    int i = 1;
+-    struct Node *node11 = list.head;
+-    while (node11 != NULL)  {
+-        //struct MdbRec* d1 = node1->data;
+-        //printf("[%3d] %s %s \n",i++, (char*)d1->name, (char*)d1->msg);
+-        printf("[%3d] %s %s \n",i++,  ((struct MdbRec*)(node11->data))->name, ((struct MdbRec*)(node11->data))->msg);
+-        
+-
+-        node11 = node11->next;
++        printf("\nlookup: ");
+     }
+-*/
+ 
+     free_list(list.head);
+ 
+-- 
+2.17.1
+
+
+From 827d68ca657c6d27e8d1dff49507207b361f6596 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Tue, 22 Mar 2022 22:05:51 -0400
+Subject: [PATCH 4/5] delete some comments
+
+---
+ part1/mdb-lookup.c | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/part1/mdb-lookup.c b/part1/mdb-lookup.c
+index 5df61e9..dcdd916 100644
+--- a/part1/mdb-lookup.c
++++ b/part1/mdb-lookup.c
+@@ -39,12 +39,6 @@ int main( int argc, char** argv)
+ {
+         
+ 
+-    // printf("%s\n%s\n",argv[0], argv[1]);
+-
+-
+-    // argv++;
+-
+-
+     if (argc != 2) {
+         fprintf(stderr, "%s\n", "usage:  mdb-lookup <file_name>");
+         exit(1);
+@@ -65,7 +59,6 @@ int main( int argc, char** argv)
+ 
+ 
+     struct Node* node = list.head;
+-
+     struct MdbRec* record = malloc(40);
+ 
+ 
+@@ -82,8 +75,6 @@ int main( int argc, char** argv)
+     printf("lookup: ");
+     while (fgets(buf, 500, stdin) != NULL) {
+ 
+-
+-        //printf("%s %ld ", buf, strlen(buf));
+         if (strlen(buf) > 1) { // '\n' count len = 1
+             char keyword[6];
+             strncpy(keyword, buf, strlen(buf) - 1); // buf has last char '\n' before '\0' ('\0' is added by fgets)
+-- 
+2.17.1
+
+
+From 3e090dd1ce07e0a61bd0f10f85266b8fe41ac609 Mon Sep 17 00:00:00 2001
+From: Yixuan_Zou <yz4004@columbia.edu>
+Date: Tue, 22 Mar 2022 22:07:02 -0400
+Subject: [PATCH 5/5] modify Makefile
+
+---
+ part1/Makefile | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+ create mode 100644 part1/Makefile
+
+diff --git a/part1/Makefile b/part1/Makefile
+new file mode 100644
+index 0000000..a1b8ce4
+--- /dev/null
++++ b/part1/Makefile
+@@ -0,0 +1,23 @@
++CC  = gcc
++CXX = g++
++
++INCLUDES =
++
++CFLAGS   = -g -Wall $(INCLUDES)
++CXXFLAGS = -g -Wall $(INCLUDES)
++
++LDFLAGS = -g
++
++mdb-lookup:  mdb-lookup.o
++	gcc  mdb-lookup.o -o mdb-lookup  -lmylist -L../../lab3/solutions/part1
++
++mdb-lookup.o:  mdb-lookup.c 
++	gcc -c  mdb-lookup.c -o  mdb-lookup.o -I../../lab3/solutions/part1
++
++
++.PHONY: clean
++clean:
++	rm -f *.o a.out core main
++
++.PHONY: all
++all: clean main
+-- 
+2.17.1
+
